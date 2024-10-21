@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 ROOT_DIR = os.path.dirname(os.path.dirname(__file__)) + '/GraphDeepLearning'
-DATASET_DIR = ROOT_DIR + '/dataset/'
+DATASET_DIR = ROOT_DIR + '/datasets/'
 OUTPUT_DIR_PATH = ROOT_DIR + '/outputs/'
 INPUT_DIR_PATH = ROOT_DIR + '/inputs/'
 CUT_PERCENTAGE_DATASET = 100

@@ -63,7 +63,7 @@ def extract_embeddings_subtask1():
     # NOTA: el prefijo "autext_" se quedó para todos los dataset, no solo para el de autexttification
 
     # ****************************** READ DATASET SEMEVAL 2024
-    
+
     dataset_name = 'semeval24'
     autext_train_set = utils.read_json(dir_path=utils.DATASET_DIR + 'semeval2024/subtask1/subtaskA_train_monolingual.jsonl')
     autext_val_set = utils.read_json(dir_path=utils.DATASET_DIR + 'semeval2024/subtask1/subtaskA_dev_monolingual.jsonl')
@@ -114,10 +114,10 @@ def extract_embeddings_subtask1():
     print(autext_test_set.info())
     print(autext_train_set['label'].value_counts())
     '''
-    
     '''
+    
     print(40*'*', 'Dataset Distro-Partition')
-    subtask = 'subtask2' # subtask1, subtask2
+    subtask = 'subtask1' # subtask1, subtask2
     dataset = load_dataset("symanto/autextification2023", 'attribution_en') # ['detection_en', 'attribution_en', 'detection_es', 'attribution_es']
     train_set = pd.DataFrame(dataset['train'])
     autext_test_set = pd.DataFrame(dataset['test'])
@@ -610,8 +610,8 @@ if __name__ == '__main__':
     
     #main()
     extract_embeddings_subtask1() 
-    train_clf_model_batch_subtask()
-    test_eval_subtask()
+    #train_clf_model_batch_subtask()
+    #test_eval_subtask()
 
 
 # ********* CMDs

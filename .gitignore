@@ -1,0 +1,14 @@
+/venv
+__pycache__/
+.env
+logs/*
+datasets/*
+inputs/*
+outputs/*
+outputs/batch_experiments/*
+
+!logs/.gitkeep
+!datasets/.gitkeep
+!inputs/.gitkeep
+!outputs/.gitkeep
+!outputs/batch_experiments/.gitkeep
