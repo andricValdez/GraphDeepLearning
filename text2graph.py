@@ -119,10 +119,10 @@ class Text2Graph():
         self.stopwords_lang = {
             "en": self._set_stopwords(utils.INPUT_DIR_PATH + '/stopwords_en.txt'),
             "es": self._set_stopwords(utils.INPUT_DIR_PATH + '/stopwords_es.txt'),
-            "pt": self._set_stopwords(utils.INPUT_DIR_PATH + '/stopwords_pt.txt'),
-            "ca": self._set_stopwords(utils.INPUT_DIR_PATH + '/stopwords_ca.txt'),
-            "eu": self._set_stopwords(utils.INPUT_DIR_PATH + '/stopwords_eu.txt'),
-            "gl": self._set_stopwords(utils.INPUT_DIR_PATH + '/stopwords_gl.txt'),
+            #"pt": self._set_stopwords(utils.INPUT_DIR_PATH + '/stopwords_pt.txt'),
+            #"ca": self._set_stopwords(utils.INPUT_DIR_PATH + '/stopwords_ca.txt'),
+            #"eu": self._set_stopwords(utils.INPUT_DIR_PATH + '/stopwords_eu.txt'),
+            #"gl": self._set_stopwords(utils.INPUT_DIR_PATH + '/stopwords_gl.txt'),
         }
 
         # scpay model

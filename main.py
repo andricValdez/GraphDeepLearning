@@ -70,9 +70,8 @@ def extract_embeddings_subtask1():
     autext_test_set = utils.read_json(dir_path=utils.DATASET_DIR + 'semeval2024/subtask1/subtaskA_test_monolingual.jsonl')
     print(autext_train_set.info())
     
-
     autext_train_set['word_len'] = autext_train_set['text'].str.split().str.len()
-    autext_train_set = autext_train_set[autext_train_set['word_len'] <= 1000]
+    autext_train_set = autext_train_set[autext_train_set['word_len'] <= 1500]
     autext_train_set = autext_train_set[autext_train_set['word_len'] >= 10]
     #autext_train_set, autext_val_set = train_test_split(autext_train_set, test_size=0.3)
     print(autext_train_set.value_counts('label'))
@@ -83,7 +82,6 @@ def extract_embeddings_subtask1():
     print(autext_val_set.info())
     print(autext_test_set.info())
     print(autext_val_set['model'].value_counts())
-    
     
     '''
     autext_train_set = utils.read_json(dir_path=utils.DATASET_DIR + 'semeval2024/original/subtaskA_train_monolingual.jsonl')
@@ -169,15 +167,18 @@ def extract_embeddings_subtask1():
     # andricValdez/roberta-base-finetuned-semeval24 
     '''
     # ****************************** PROCESS AUTEXT DATASET && CUTOF
-    cut_off_dataset = 100
+    cut_off_dataset = 10
     train_text_docs = utils.process_dataset(autext_train_set)
     val_text_docs = utils.process_dataset(autext_val_set)
     #test_text_docs = utils.process_dataset(autext_test_set)
 
     cut_dataset_train = len(train_text_docs) * (int(cut_off_dataset) / 100)
     train_text_docs = train_text_docs[:int(cut_dataset_train)]
+
+    #cut_dataset_val = len(val_text_docs) * (int(cut_off_dataset) / 100)
     cut_dataset_val = len(val_text_docs) * (int(100) / 100)
     val_text_docs = val_text_docs[:int(cut_dataset_val)]
+
     #cut_dataset_test = len(test_text_docs) * (int(cut_off_dataset) / 100)
     #test_text_docs = test_text_docs[:int(cut_dataset_test)]
 
@@ -216,7 +217,7 @@ def extract_embeddings_subtask1():
     return
     '''
     # ****************************** GRAPH NEURAL NETWORK - RUN EXPERIMENTS IN BATCHES
-    
+    '''
     num_classes = 2
     exp_file_name = 'experiments_cooccurrence_20241019131147_llm' 
     experiments_path = f'{utils.OUTPUT_DIR_PATH}batch_experiments/'
@@ -232,7 +233,7 @@ def extract_embeddings_subtask1():
         num_classes=num_classes
     )
     return
-    
+    '''
     # ****************************** GRAPH NEURAL NETWORK - ONE RUNNING
 
     lang = 'en' #es, en, fr 
@@ -245,11 +246,10 @@ def extract_embeddings_subtask1():
                 "handle_blank_spaces": True,
                 "handle_html_tags": True,
                 "handle_special_chars": True,
-                "handle_stop_words": True,
+                "handle_stop_words": False,
             },
             language = lang, #es, en, fr
     )
-
 
     exp_file_name = "test"
     dataset_partition = f'{dataset_name}_{cut_off_dataset}perc' # perc | perc_go_cls | perc_go_e5
@@ -257,8 +257,12 @@ def extract_embeddings_subtask1():
     utils.create_expriment_dirs(exp_file_path)
     
     cuda_num = 0
-    num_classes = 2
-    llm_model_name = 'andricValdez/roberta-base-finetuned-semeval24'
+    num_classes = 2 # num output classes
+    num_features = 256 # llm: 768 | w2v: 768, 512, 256
+    batch_size_gnn = 64 # 16 -> semeval | 64 -> autext
+    edge_features = False
+    nfi = 'w2v' # llm, w2v, fasttext, random
+    llm_model_name = 'andricValdez/bert-base-uncased-finetuned-semeval24'
     
     device = torch.device(f"cuda:{cuda_num}" if torch.cuda.is_available() else "cpu")
     
@@ -267,19 +271,21 @@ def extract_embeddings_subtask1():
         dataset_partition = dataset_partition,
         exp_file_path = exp_file_path,
         graph_trans = True, # True, False, None
-        nfi = 'w2v', # llm, w2v, fasttext, random
+        nfi = nfi,
         cut_off_dataset = cut_off_dataset, 
         t2g_instance = t2g_instance,
-        train_text_docs = train_text_docs[ : int(len(train_text_docs) * (int(100) / 100))], 
-        val_text_docs = val_text_docs[ : int(len(val_text_docs) * (int(100) / 100))],
+        train_text_docs = train_text_docs, # train_text_docs[ : int(len(train_text_docs) * (int(100) / 100))], 
+        val_text_docs = val_text_docs, # val_text_docs[ : int(len(val_text_docs) * (int(100) / 100))],
         test_text_docs = None,
         device = device,
-        edge_features=True,
-        edge_dim=2,
+        edge_features = edge_features,
+        edge_dim = 2,
+        num_features = num_features, 
+        batch_size_gnn = batch_size_gnn,
         build_dataset = True, # True, False
         save_data = True,
-        llm_finetuned_name=llm_model_name,
-        num_classes=num_classes,
+        llm_finetuned_name = llm_model_name,
+        num_classes = num_classes,
     )
     # google-bert/bert-base-uncased
     # FacebookAI/roberta-base
@@ -318,8 +324,8 @@ def extract_embeddings_subtask1():
 
 def train_clf_model_batch_subtask():
     dataset_name = 'semeval24' # autext23, autext23_s2, semeval24
-    cuda_num = 1
-    cut_off_dataset = 50
+    cuda_num = 0
+    cut_off_dataset = 10
 
     train_set_mode = 'train' # train | train_all
     # test_autext24_all_100perc, subtask2/test_autext24_subtask2_all_100perc
@@ -467,16 +473,19 @@ def test_eval_subtask():
     dataset = 'semeval2024' # autext2023, semeval2024
     dataset_name = 'semeval24' # autext23, autext23_s2, semeval24
     subtask = 'subtask_1' # subtask_1, subtask_2
-    extract_embeddings = True
     feat_type = 'embedding_' + 'gnn' # embedding_all | embedding_gnn_llm | embedding_gnn |embedding_gnn_stylo | embedding_llm_stylo | embedding_llm_stylo
-    cuda_num = 1
+    
+    extract_embeddings = True
+    cuda_num = 0
     num_labels = 2
-    llm_finetuned_name = 'andricValdez/roberta-base-finetuned-semeval24'
+    num_features = 256
+    edge_features = False
+    nfi='w2v' # llm, w2v, fasttext, random
+    llm_finetuned_name = 'andricValdez/bert-base-uncased-finetuned-semeval24'
 
-    cut_off_dataset = 50
+    cut_off_dataset = 10
     cut_off_test_dataset = 100
     exp_file_name = "test"
-    nfi='w2v' # llm, w2v, fasttext, random
 
     device = torch.device(f"cuda:{cuda_num}" if torch.cuda.is_available() else "cpu")
 
@@ -513,14 +522,14 @@ def test_eval_subtask():
 
     t2g_instance = text2graph.Text2Graph(
         graph_type = 'DiGraph',
-            window_size = 2, 
+            window_size = 3, 
             apply_prep = True, 
             steps_preprocessing = {
                 "to_lowercase": True,
                 "handle_blank_spaces": True,
                 "handle_html_tags": True,
                 "handle_special_chars":True,
-                "handle_stop_words": True,
+                "handle_stop_words": False,
             },
             language = 'en', #es, en, fr
     )
@@ -532,7 +541,7 @@ def test_eval_subtask():
     # ******************** get Features/Embeddings    
     if extract_embeddings:
         #  get GNN Emb
-        gnn.graph_neural_network_test_eval(test_text_docs, t2g_instance, nfi, exp_file_path, dataset_partition, llm_finetuned_name, device) 
+        gnn.graph_neural_network_test_eval(test_text_docs, t2g_instance, nfi, exp_file_path, dataset_partition, llm_finetuned_name, edge_features, num_features, device) 
   
         #  get LLM Emb 1
         #utils.llm_get_embbedings(
@@ -610,8 +619,8 @@ if __name__ == '__main__':
     
     #main()
     extract_embeddings_subtask1() 
-    #train_clf_model_batch_subtask()
-    #test_eval_subtask()
+    train_clf_model_batch_subtask()
+    test_eval_subtask()
 
 
 # ********* CMDs

@@ -369,7 +369,7 @@ def gnn_model(
     logger.info("device: %s", str(device))
     #model = model.to(device)
     #model = DataParallel(model, device_ids = [0,1]).to(device)
-    early_stopper = EarlyStopper(patience=10, min_delta=0)
+    early_stopper = EarlyStopper(patience=15, min_delta=0)
     best_train_embeddings = None
     best_val_embeddings = None
     best_model = None
@@ -476,14 +476,13 @@ def graph_neural_network(
         llm_finetuned_name,
         edge_dim=2,
         num_classes=2,
+        num_features=256,
+        batch_size_gnn=32,
         build_dataset = True,
         save_data = True
 
     ):
     
-    load_tensor = True
-    batch_size_gnn = 32 # 16 -> semeval | 64 -> autext
-    num_features = 512 * 1 #+ 1024 # llm: 768 | w2v: 768
     if llm_finetuned_name == 'andricValdez/multilingual-e5-large-finetuned-autext24':
         num_features = 1024 # llm: 768 | w2v: 768
 
@@ -534,7 +533,7 @@ def graph_neural_network(
         val_dataset = val_build_dataset.process_dataset()
 
 
-    #if load_tensor == True:
+    #if True:
     if not utils.is_dir_empty(dir_path=f'{exp_file_path}/embeddings_word_llm'):
         train_dataset_tensors = glob.glob(f'{exp_file_path}/embeddings_word_llm/data_train_*.pt')
         val_dataset_tensors = glob.glob(f'{exp_file_path}/embeddings_word_llm/data_val_*.pt')
@@ -552,8 +551,8 @@ def graph_neural_network(
         print("train_dataset: ", len(train_dataset), "| val_dataset: ", len(val_dataset))
 
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size_gnn, shuffle=True, num_workers=0, pin_memory=False)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size_gnn, shuffle=True, num_workers=0, pin_memory=False)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size_gnn, shuffle=True, num_workers=4, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size_gnn, shuffle=True, num_workers=4, pin_memory=True)
     init_metrics = {'_epoch_stop': 0,'_train_loss': 0,'_val_loss': 0,'_train_acc': 0,'_val_last_acc': 0,'_test_acc': 0,'_exec_time': 0,}
 
     torch.cuda.empty_cache()
@@ -573,8 +572,8 @@ def graph_neural_network(
         'gnn_dropout': 0.6,
         'gnn_pooling': 'gmeanp', # gmeanp, gmaxp, topkp, sagp
         'gnn_batch_norm': 'BatchNorm1d', # None, BatchNorm1d
-        'gnn_layers_convs': 3,
-        'gnn_heads': 2, 
+        'gnn_layers_convs': 4,
+        'gnn_heads': 3, 
         'gnn_dense_nhid': 128,
         'num_classes': num_classes,
         'edge_dim': edge_dim, # None, 2 
@@ -809,26 +808,24 @@ def graph_neural_network_batch(autext_train_set, autext_val_set, autext_test_set
     print('*** DONE EXPERIMENTS') 
 
 
-def graph_neural_network_test_eval(autext_test_set, t2g_instance, nfi, exp_file_path, dataset_partition, llm_finetuned_name, device):
+def graph_neural_network_test_eval(autext_test_set, t2g_instance, nfi, exp_file_path, dataset_partition, llm_finetuned_name, edge_features, num_features, device):
 
     #  Text 2 Graph test data and BuildDataset
     subset = 'test'
-    edge_features = True
-    num_features = 512
-
-    #graphs_test_data = utils.t2g_transform(autext_test_set, t2g_instance)
-    #utils.save_data(graphs_test_data, path=f'{utils.OUTPUT_DIR_PATH}graphs/', file_name=f'graphs_{subset}_{dataset_partition}')
+    batch_size_gnn = 64
+    graphs_test_data = utils.t2g_transform(autext_test_set, t2g_instance)
+    utils.save_data(graphs_test_data, path=f'{utils.OUTPUT_DIR_PATH}graphs/', file_name=f'graphs_{subset}_{dataset_partition}')
     #graphs_test_data = utils.load_data(path=f'{utils.OUTPUT_DIR_PATH}graphs/', file_name=f'graphs_{subset}_semeval24_100perc')  
 
-    #test_build_dataset = BuildDataset(graphs_test_data[:], subset=f'{subset}', device=device, edge_features='True', nfi=nfi, llm_finetuned_name=llm_finetuned_name, exp_file_path=exp_file_path, dataset_partition=dataset_partition, num_features=num_features)
-    #test_dataset = test_build_dataset.process_dataset()
+    test_build_dataset = BuildDataset(graphs_test_data[:], subset=f'{subset}', device=device, edge_features=edge_features, nfi=nfi, llm_finetuned_name=llm_finetuned_name, exp_file_path=exp_file_path, dataset_partition=dataset_partition, num_features=num_features)
+    test_dataset = test_build_dataset.process_dataset()
 
     test_dataset_tensors = glob.glob(f'{exp_file_path}/embeddings_word_llm/data_{subset}_*.pt')
     test_dataset = []
     for tensor_file in test_dataset_tensors:
         test_dataset.extend(torch.load(tensor_file))
 
-    test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False, num_workers=0, pin_memory=False)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size_gnn, shuffle=True, num_workers=4, pin_memory=True)
     
     #  get GNN Emb
     gnn_model_name = f'model_GNN_test_{dataset_partition}'

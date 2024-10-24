@@ -1,0 +1,4 @@
+
+
+* Probar con otros tamaños del grafo de coo-ocurrencia, buscar una manera de recortar/eliminar nodos y aristas
+
