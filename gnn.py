@@ -35,8 +35,10 @@ from sklearn.metrics import f1_score
 from collections import OrderedDict
 import warnings
 from transformers import logging as transform_loggin
-from sklearn.metrics import f1_score, accuracy_score
-
+from sklearn.metrics import confusion_matrix, f1_score, accuracy_score, precision_score, recall_score, roc_auc_score
+import mlflow
+import matplotlib.pyplot as plt 
+import seaborn as sns
 
 import utils
 import node_feat_init
@@ -52,7 +54,6 @@ warnings.filterwarnings("ignore")
 transform_loggin.set_verbosity_error()
 
 os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
-
 
 class EarlyStopper:
     def __init__(self, patience=1, min_delta=0):
@@ -131,6 +132,7 @@ class GNN(torch.nn.Module):
         if batch_norm != None:
             #self.bn1 = BatchNorm1d(hidden_channels*heads)
             self.bn1 = BatchNorm1d(hidden_channels)
+            #self.bn1 = LayerNorm(hidden_channels)
 
         # Other layers
         for i in range(self.n_layers):
@@ -144,6 +146,7 @@ class GNN(torch.nn.Module):
             if batch_norm != None:
                 #self.bn_layers.append(BatchNorm1d(hidden_channels*heads))
                 self.bn_layers.append(BatchNorm1d(hidden_channels))
+                #self.bn_layers.append(LayerNorm(hidden_channels))
             if pooling == 'topkp':
                 if i % self.top_k_every_n == 0:
                     #self.pooling_layers.append(TopKPooling(hidden_channels*heads, ratio=self.top_k_ratio))
@@ -158,6 +161,7 @@ class GNN(torch.nn.Module):
             len_lin1_vect = 2
         
         self.linear1 = Linear(hidden_channels*len_lin1_vect, self.dense_neurons) 
+        #self.linear2 = Linear(int(self.dense_neurons), num_classes)
         self.linear2 = Linear(self.dense_neurons, int(self.dense_neurons)//2)
         self.linear3 = Linear(int(self.dense_neurons)//2, num_classes)
 
@@ -183,11 +187,11 @@ class GNN(torch.nn.Module):
                 x = self.conv_layers[i](x, edge_index)
             #x = x.relu()
             x = torch.relu(self.transf_layers[i](x))
+            x = F.dropout(x, p=self.dropout_rate, training=self.training)
 
             if self.batch_norm != None:
                 x = self.bn_layers[i](x)
-            
-            #x = F.dropout(x, p=self.dropout_rate, training=self.training)
+
             if self.pooling in ['topkp', 'sagp']:
                 if i % self.top_k_every_n == 0 or i == self.n_layers:
                     if self.support_edge_attr:
@@ -195,6 +199,8 @@ class GNN(torch.nn.Module):
                     else:
                         x, edge_index, _, batch, _, _  = self.pooling_layers[int(i/self.top_k_every_n)](x=x, edge_index=edge_index, batch=batch)
                     global_representation.append(global_mean_pool(x, batch))
+
+        emb = x
 
         # Aplpy graph pooling
         if self.pooling in ['topkp', 'sagp']:
@@ -214,9 +220,11 @@ class GNN(torch.nn.Module):
         out = F.dropout(out, p=self.dropout_rate, training=self.training) 
         out = torch.relu(self.linear2(out))
         out = F.dropout(out, p=self.dropout_rate, training=self.training) 
-        out = self.linear3(out)
+        #out = self.linear3(out)
         
-        return out, x 
+        out = F.softmax(self.linear3(out), dim=1)
+
+        return out, x
         #return x
 
 
@@ -330,6 +338,37 @@ def test_train_concat_emb(dense_model, criterion, val_data, val_labels, epoch):
         
         return acc, f1_scre, loss, preds_test
 
+ 
+def log_conf_matrix(y_pred, y_true, epoch):
+    # Log confusion matrix as image
+    cm = confusion_matrix(y_pred, y_true)
+    classes = ["0", "1"]
+    df_cfm = pd.DataFrame(cm, index = classes, columns = classes)
+    plt.figure(figsize = (10,7))
+    cfm_plot = sns.heatmap(df_cfm, annot=True, cmap='Blues', fmt='g')
+    cfm_plot.figure.savefig(f'{utils.OUTPUT_DIR_PATH}/images/cm_{epoch}.png')
+    mlflow.log_artifact(f"{utils.OUTPUT_DIR_PATH}/images/cm_{epoch}.png")
+
+
+def calculate_metrics(y_pred, y_true, epoch, type):
+    #print("*************** type:", type)
+    cm = confusion_matrix(y_pred, y_true)
+    f1 = f1_score(y_true, y_pred)
+    acc = accuracy_score(y_true, y_pred)
+    prec = precision_score(y_true, y_pred)
+    rec = recall_score(y_true, y_pred)
+    mlflow.log_metric(key=f"F1Score-{type}", value=float(f1), step=epoch)
+    mlflow.log_metric(key=f"Accuracy-{type}", value=float(acc), step=epoch)
+    mlflow.log_metric(key=f"Precision-{type}", value=float(prec), step=epoch)
+    mlflow.log_metric(key=f"Recall-{type}", value=float(rec), step=epoch)
+    
+    #print(f'Epoch: {epoch:03d} | F1Score-{type}: {f1:.4f} | Accuracy-{type}: {acc:.4f} | Precision-{type}: {prec:.4f} | Recall-{type}: {rec:.4f}')
+    try:
+        roc = roc_auc_score(y_true, y_pred)
+        mlflow.log_metric(key=f"ROC-AUC-{type}", value=float(roc), step=epoch)
+    except:
+        mlflow.log_metric(key=f"ROC-AUC-{type}", value=float(0), step=epoch)
+
 
 def gnn_model(
                 train_loader, val_loader, metrics, device,
@@ -353,6 +392,7 @@ def gnn_model(
         dense_nhid=gnn_dense_nhid,
         edge_dim=edge_dim
     )
+    
 
     model = model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
@@ -384,9 +424,9 @@ def gnn_model(
     try:
         for epoch in range(1, epoch_num):
             epochs_cnt += 1
-            model, train_loss, train_embeddings, _ = train(model, criterion, optimizer, train_loader, device=device)
-            _, train_acc, _, _ = test(model, criterion, train_loader, device=device)
-            val_loss, val_acc, val_embeddings, _ = test(model, criterion, val_loader , device=device)
+            model, train_acc, train_loss, train_embeddings, _ = train(model, criterion, optimizer, train_loader, epoch, device=device)
+            #_, train_acc, _, _ = test(model, criterion, train_loader, epoch, type='train', device=device)
+            val_loss, val_acc, val_embeddings, _ = test(model, criterion, val_loader , epoch, type='valid', device=device)
             print(f'Epoch: {epoch:03d} | Train Loss {train_loss} | Train Acc: {train_acc:.4f} | Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.4f}')
             avg_val_score += val_acc
             if val_acc > best_val_score:
@@ -401,6 +441,10 @@ def gnn_model(
             metrics['_val_loss'] = val_loss
             metrics['_train_acc'] = train_acc
             metrics['_val_last_acc'] = val_acc
+
+            #for key in metrics.keys():
+            #    mlflow.log_metric(key=key, value=metrics[key], step=epoch)
+
             if early_stopper.early_stop(val_loss): 
                 print('Early stopping fue to not improvement!')            
                 break
@@ -417,13 +461,14 @@ def gnn_model(
         return best_model, optimizer, metrics, best_train_embeddings, best_val_embeddings
 
 
-def test(model, criterion, loader, device='cpu'):
+def test(model, criterion, loader, epoch, type, device='cpu'):
     model.eval()
     correct = 0
     test_loss = 0.0
     steps = 0
     pred_loader = []
     embeddings_data = []
+    all_preds, all_labels = [], []
 
     with torch.no_grad():
         for step, data in enumerate(loader):  # Iterate in batches over the training/test dataset.
@@ -438,26 +483,41 @@ def test(model, criterion, loader, device='cpu'):
             test_loss += loss.item()
             steps += 1
             pred_loader.append(data)
+
+            all_preds.append(out.argmax(dim=1).cpu().detach().numpy())
+            all_labels.append(data.y.cpu().detach().numpy())
+        all_preds = np.concatenate(all_preds).ravel()
+        all_labels = np.concatenate(all_labels).ravel()
+        calculate_metrics(all_preds, all_labels, epoch, type)
+        log_conf_matrix(all_preds, all_labels, epoch)
         return test_loss / steps, correct / len(loader.dataset), embeddings_data, pred_loader  # Derive ratio of correct predictions.
 
 
-def train(model, criterion, optimizer, loader, device='cpu'):
+def train(model, criterion, optimizer, loader, epoch, device='cpu'):
     model.train()
     train_loss = 0.0
     steps = 0
     embeddings_data = []
+    all_preds, all_labels = [], []
     for step, data in enumerate(loader):  # Iterate in batches over the training dataset.
         data.to(device) 
         #print('training batch...', step)
         out, embeddings = model.forward(data.x, data.edge_index, data.edge_attr, data.batch)  # Perform a single forward pass.
         embeddings_data.append({'batch': step, 'doc_id': data.context['id'], 'labels': data.y, 'embedding': embeddings})
+        
         loss = criterion(out, data.y)  # Compute the loss.
         loss.backward()  # Derive gradients.
         optimizer.step()  # Update parameters based on gradients.
         optimizer.zero_grad()  # Clear gradients.
         train_loss += loss.item()
         steps += 1
-    return model, train_loss / steps, embeddings_data, loader
+
+        all_preds.append(out.argmax(dim=1).cpu().detach().numpy())
+        all_labels.append(data.y.cpu().detach().numpy())
+    all_preds = np.concatenate(all_preds).ravel()
+    all_labels = np.concatenate(all_labels).ravel()
+    calculate_metrics(all_preds, all_labels, epoch, "train")
+    return model, accuracy_score(all_labels, all_preds), train_loss / steps, embeddings_data, loader
 
 
 def graph_neural_network(
@@ -551,8 +611,8 @@ def graph_neural_network(
         print("train_dataset: ", len(train_dataset), "| val_dataset: ", len(val_dataset))
 
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size_gnn, shuffle=True, num_workers=4, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size_gnn, shuffle=True, num_workers=4, pin_memory=True)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size_gnn, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size_gnn, shuffle=True)
     init_metrics = {'_epoch_stop': 0,'_train_loss': 0,'_val_loss': 0,'_train_acc': 0,'_val_last_acc': 0,'_test_acc': 0,'_exec_time': 0,}
 
     torch.cuda.empty_cache()
@@ -569,7 +629,7 @@ def graph_neural_network(
         'num_features': num_features, 
         'hidden_channels': 512, # size out embeddings: 256, 512, 768
         'learning_rate': 0.00001, # W2V: 0.0001 | LLM: 0.00001, 0.000001
-        'gnn_dropout': 0.6,
+        'gnn_dropout': 0.5,
         'gnn_pooling': 'gmeanp', # gmeanp, gmaxp, topkp, sagp
         'gnn_batch_norm': 'BatchNorm1d', # None, BatchNorm1d
         'gnn_layers_convs': 4,
@@ -580,8 +640,15 @@ def graph_neural_network(
         'retrain_model_name': exp_file_path + 'model_GNN_test_autext24_all_100perc_50_p1.pt',
         'retrain_model': False
     }
+
     model, optimizer, metrics, embeddings_train_gnn, embeddings_val_gnn = gnn_model(**train_model_args)
-    
+
+    mlflow.pytorch.log_model(model, "model")
+    for key in train_model_args.keys():
+        if key in ['train_loader', 'val_loader', 'retrain_model_name', 'metrics']: 
+            continue
+        mlflow.log_param(key, train_model_args[key])
+
     torch.save({
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),

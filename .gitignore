@@ -6,6 +6,9 @@ datasets/*
 inputs/*
 outputs/*
 outputs/batch_experiments/*
+mlruns/*
+mlartifacts/*
+test-mlflow.py
 
 !logs/.gitkeep
 !datasets/.gitkeep
