@@ -347,7 +347,6 @@ def log_conf_matrix(y_pred, y_true, epoch):
     plt.figure(figsize = (10,7))
     cfm_plot = sns.heatmap(df_cfm, annot=True, cmap='Blues', fmt='g')
     cfm_plot.figure.savefig(f'{utils.OUTPUT_DIR_PATH}/images/cm_{epoch}.png')
-    mlflow.log_artifact(f"{utils.OUTPUT_DIR_PATH}/images/cm_{epoch}.png")
 
 
 def calculate_metrics(y_pred, y_true, epoch, type):
@@ -357,17 +356,6 @@ def calculate_metrics(y_pred, y_true, epoch, type):
     acc = accuracy_score(y_true, y_pred)
     prec = precision_score(y_true, y_pred)
     rec = recall_score(y_true, y_pred)
-    mlflow.log_metric(key=f"F1Score-{type}", value=float(f1), step=epoch)
-    mlflow.log_metric(key=f"Accuracy-{type}", value=float(acc), step=epoch)
-    mlflow.log_metric(key=f"Precision-{type}", value=float(prec), step=epoch)
-    mlflow.log_metric(key=f"Recall-{type}", value=float(rec), step=epoch)
-    
-    #print(f'Epoch: {epoch:03d} | F1Score-{type}: {f1:.4f} | Accuracy-{type}: {acc:.4f} | Precision-{type}: {prec:.4f} | Recall-{type}: {rec:.4f}')
-    try:
-        roc = roc_auc_score(y_true, y_pred)
-        mlflow.log_metric(key=f"ROC-AUC-{type}", value=float(roc), step=epoch)
-    except:
-        mlflow.log_metric(key=f"ROC-AUC-{type}", value=float(0), step=epoch)
 
 
 def gnn_model(
@@ -442,8 +430,6 @@ def gnn_model(
             metrics['_train_acc'] = train_acc
             metrics['_val_last_acc'] = val_acc
 
-            #for key in metrics.keys():
-            #    mlflow.log_metric(key=key, value=metrics[key], step=epoch)
 
             if early_stopper.early_stop(val_loss): 
                 print('Early stopping fue to not improvement!')            
@@ -643,11 +629,6 @@ def graph_neural_network(
 
     model, optimizer, metrics, embeddings_train_gnn, embeddings_val_gnn = gnn_model(**train_model_args)
 
-    mlflow.pytorch.log_model(model, "model")
-    for key in train_model_args.keys():
-        if key in ['train_loader', 'val_loader', 'retrain_model_name', 'metrics']: 
-            continue
-        mlflow.log_param(key, train_model_args[key])
 
     torch.save({
             'model_state_dict': model.state_dict(),
