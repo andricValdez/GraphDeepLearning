@@ -14,9 +14,15 @@ from joblib import Parallel, delayed
 import time
 from polyglot.detect import Detector
 from polyglot.detect.base import logger as polyglot_logger
+import re
 
 from stylometric import StyloCorpus
 import node_feat_init
+
+import nltk
+from nltk.corpus import stopwords
+nltk.download('stopwords')
+nltk.download('punkt_tab')
 
 polyglot_logger.setLevel("ERROR")
 
@@ -108,16 +114,19 @@ def process_dataset(corpus_text_docs):
     text_data_lst = []
     #corpus_text_docs = shuffle(corpus_text_docs)
     corpus_text_docs_dict = corpus_text_docs.to_dict('records')
-    for instance in corpus_text_docs_dict:
+    for idx, instance in enumerate(corpus_text_docs_dict):
         #if len(instance['text'].split()) < 20:
         #    continue
         doc = {
-            "id": instance['id'], 
+            #"id": instance['id'], 
+            "id": idx+1,
             "doc": instance['text'][:], 
             "label": instance['label'], 
             #"model": instance['model'], 
             "context": {
-                "id": instance['id'], "target": instance['label'], 
+                #"id": instance['id'], 
+                "id": idx+1,
+                "target": instance['label'], 
                 #"lang": instance['lang'], "lang_code": instance['lang_code'], 'lang_confidence': instance['lang_confidence']
             }
         }
@@ -251,3 +260,20 @@ def llm_get_embbedings(text_data, exp_file_path, subset, emb_type, device, save_
     #node_feat_init.llm_get_embbedings(text_data_lst, subset=subset, emb_type=emb_type, device=device, output_path=output_train_path, save_emb=True, llm_finetuned_name=llm_finetuned_name, num_labels=num_labels)
     output_train_path = f"{exp_file_path}/autext_{subset}_embeddings.jsonl"
     node_feat_init.llm_get_embbedings_2(text_data_lst, subset=subset, emb_type=emb_type, device=device, output_path=output_train_path, save_emb=True, llm_finetuned_name=llm_finetuned_name, num_labels=num_labels)
+
+def text_normalize(text, tokenize_pattern):
+    
+    # *** text to lower case
+    text = text.lower() 
+    # *** remove blank spaces
+    text = re.sub(r'\s+', ' ', text).strip() 
+    # *** remove html tags
+    text = re.compile('<.*?>').sub(r'', text) 
+    # *** remove special chars
+    #text = re.sub('[^A-Za-z0-9]+ ', '', text) 
+    #text = text.replace('"',"")
+    # *** remove stop words
+    #text_doc_tokens = re.findall(tokenize_pattern, text)
+    #without_stopwords = [word for word in text_doc_tokens if not word.lower().strip() in set(stopwords.words('english'))]
+    #text = " ".join(without_stopwords)
+    return text

@@ -5,6 +5,7 @@ import utils
 def get_template_comb_dict():
     return {
         'id': None,
+        'dataset_name': 'coling2024',
         'dataset_percent': None,
         'graph_type': None,
         'window_size': None,
@@ -26,7 +27,7 @@ def get_template_comb_dict():
         'gnn_batch_norm': None,
         'gnn_edge_attr': None,
         'epoch_num': None,
-        'cuda_num': 1,
+        'cuda_num': 0,
         '_epoch_stop': None,
         '_train_loss': None,
         '_val_loss': None,
@@ -83,17 +84,17 @@ def main(graph_type):
         # 0 - graph type       [graph_type],
         [graph_type], 
         # 1 - graph_node_feat_init LLM, W2V  (see below)
-        ['llm', 'w2v'], 
+        ['llm'], 
         # 2 - graph_nfi_embb_size size of LLM or W2V [64,128,256,512,768] (see below)
-        [256, 512, 768],  
+        [768],  
         # 3 - gnn_type (see below)     [],   
         [],                                  
         # 4 - gnn_heads (see below)    [],       
         [],                              
         # 5 - gnn_layers_convs     [1,2,3,4]
-        [3, 4],  
+        [0, 1, 2, 3],  
         # 6 - gnn_nhid (# size out embeddings: hidden_channels)    [64,128,256,512,768]
-        [256, 512],  
+        [64, 128, 256],  
         # 7 - gnn_dense_nhid       [32,64,128]
         [128], 
         # 8 - gnn_learning_rate    [0.0001, 0.00001]
@@ -103,23 +104,23 @@ def main(graph_type):
         # 10 - gnn_pooling     ['gmeanp', 'gmaxp', 'topkp']
         ['gmeanp'], 
         # 11 - gnn_batch_norm      ['None', 'BatchNorm1d']
-        ['None', 'BatchNorm1d'], 
+        ['BatchNorm1d'], 
         # 12 - epoch_num       [100]
         [100], 
         # 13 - graph cooc window_size      [2,5,10,20],
-        [3,5],                              
+        [5],                              
         # 14 - graph edge attr cooc (see below)   [False, True],
         [],                          
         # 15 - graph handle special chars    [False, True],
-        [False, True],                          
+        [False],                          
         # 16 - graph handle stop word    [False, True],
-        [False, True],                          
+        [False],                          
         # 17 - graph edge type    ['Graph', 'DiGraph'],
         ['DiGraph'],                          
         # 18 - dataset percent  [20,50,100],
         [10],               
         # 19 - graph_node_feat_init_llm
-        ['andricValdez/roberta-base-finetuned-semeval24', 'andricValdez/bert-base-uncased-finetuned-semeval24']
+        ['andricValdez/roberta-base-finetuned-coling24']
     ]
 
     # ***** GCN specific config
@@ -130,14 +131,14 @@ def main(graph_type):
     
     # ***** GAT specific config
     graph_config[3] = ['GATConv']   # gnn_type
-    graph_config[4] = [3, 4]   # gnn_heads [1,2,3] 
-    graph_config[14] = [True]    # graph_edge_attr_cooc : False, True
+    graph_config[4] = [1, 2]   # gnn_heads [1,2,3] 
+    graph_config[14] = [False]    # graph_edge_attr_cooc : False, True
     combinations = build_comb(*graph_config)
     
     # ***** GAT specific config
     graph_config[3] = ['TransformerConv']   # gnn_type
-    graph_config[4] = [3, 4]   # gnn_heads [1,2,3] 
-    graph_config[14] = [False, True]    # graph_edge_attr_cooc : False, True
+    graph_config[4] = [1, 2]   # gnn_heads [1,2,3] 
+    graph_config[14] = [False]    # graph_edge_attr_cooc : False, True
     combinations += build_comb(*graph_config)
 
     # ***** NFI-W2v specific config

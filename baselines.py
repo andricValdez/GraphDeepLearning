@@ -75,13 +75,11 @@ def main(train_set, val_set, test_set, target_names=['human', 'generated'], algo
         X_train = vectorizer.fit_transform(train_set['text'])
         X_val = vectorizer.transform(val_set['text'])
         X_test = vectorizer.transform(test_set['text'])
-
-        print(X_train.shape, len(train_set['text']))
-        print(X_train[0].shape, X_train[1].shape)
-        print(X_val[0].shape, X_val[1].shape)
-        print(X_test[0].shape, X_test[1].shape)
-        print(X_train[0])
-
+        #print(X_train.shape, len(train_set['text']))
+        #print(X_train[0].shape, X_train[1].shape)
+        #print(X_val[0].shape, X_val[1].shape)
+        #print(X_test[0].shape, X_test[1].shape)
+        #print(X_train[0])
         model = xgb.XGBClassifier(n_jobs=-1)
         model.fit(X_train, train_set['label'])
         val_predicted = model.predict(X_val)

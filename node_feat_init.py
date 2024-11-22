@@ -2,12 +2,12 @@
 from datasets import load_dataset, Dataset, DatasetDict
 from transformers import logging
 from transformers import AutoTokenizer, AutoModel, Trainer, AutoModelForSequenceClassification, TrainingArguments
+from transformers import TrainingArguments, Trainer
+from transformers import get_scheduler
 import numpy as np
 import evaluate
-from transformers import TrainingArguments, Trainer
 from torch.utils.data import DataLoader 
 from torch.optim import AdamW
-from transformers import get_scheduler
 import torch
 from tqdm.auto import tqdm
 from tqdm import tqdm
@@ -16,6 +16,7 @@ import evaluate
 import pandas as pd
 import gc
 import gensim
+import re 
 
 import utils
 
@@ -48,7 +49,7 @@ def llm_compute_metrics(pred):
     return {"accuracy": acc, "f1": f1}
 
 
-def llm_fine_tuning(model_name, train_set_df, val_set_df, device, llm_to_finetune=LLM_HF_NAME, num_labels=6):
+def llm_fine_tuning(model_name, train_set_df, val_set_df, device, llm_to_finetune=LLM_HF_NAME, mode='finetune', num_labels=6):
 
     model_name = f"{llm_to_finetune}-finetuned-{model_name}"   
     dataset = DatasetDict({
@@ -89,16 +90,18 @@ def llm_fine_tuning(model_name, train_set_df, val_set_df, device, llm_to_finetun
         eval_dataset=tokenized_dataset["validation"],
         tokenizer=tokenizer
     )
-    trainer.train()
-    
-    trainer.evaluate()
-    preds_output = trainer.predict(tokenized_dataset["validation"])
-    print(preds_output.metrics)
-    y_preds = np.argmax(preds_output.predictions, axis=1)
-    #print(y_preds)
-    
-    trainer.push_to_hub()
-
+    if mode == 'finetune':
+        trainer.train()
+        trainer.evaluate()
+        preds_output = trainer.predict(tokenized_dataset["validation"])
+        print(preds_output.metrics)
+        trainer.push_to_hub()
+    else:
+        trainer.evaluate()
+        preds_output = trainer.predict(tokenized_dataset["validation"])
+        print(preds_output.metrics)
+        y_preds = np.argmax(preds_output.predictions, axis=1)
+        print(y_preds[:10])
 
 def llm_get_embbedings(dataset, subset, emb_type='llm_cls', device='cpu', output_path='', save_emb=False, llm_finetuned_name=LLM_HF_FINETUNED_NAME, num_labels=2):
 
@@ -196,8 +199,8 @@ def llm_get_embbedings_2(dataset, subset, emb_type='llm_cls', device='cpu', outp
         utils.save_jsonl(embeddings_lst, output_path)
  
     if emb_type == 'llm_word':
+        embeddings_word_dict = {}
         with torch.no_grad():
-            embeddings_word_dict = {}
             for row in dataset:
                 inputs = tokenizer(row["text"], return_tensors='pt', padding=True, truncation=True, max_length=512)
                 inputs.to(device)
@@ -205,23 +208,15 @@ def llm_get_embbedings_2(dataset, subset, emb_type='llm_cls', device='cpu', outp
                 last_hidden_state = outputs_model.hidden_states[-1]
 
                 embeddings_word_dict[str(row['id'])] = {"doc_id": row['id'], 'label': row['label'], 'embedding': {}} # ver forma de obtener ID de docu
-
                 for i in range(0, len(last_hidden_state)):
                     raw_tokens = [tokenizer.decode([token_id]) for token_id in inputs['input_ids'][i]]
+                    #print(len(raw_tokens), len(last_hidden_state[i]))
                     for token, embedding in zip(raw_tokens, last_hidden_state[i]):
+                        #print(str(token).strip())
                         embeddings_word_dict[str(row['id'])]['embedding'][str(token).strip()] = embedding.cpu().detach().numpy().tolist()
-        
+                        #embeddings_word_dict[str(token).strip()] = embedding.cpu().detach().numpy().tolist()
         return embeddings_word_dict
         #utils.save_jsonl([embeddings_word_dict], utils.OUTPUT_DIR_PATH + 'word_emb_test.jsonl')
-
-                     
-def w2v_train(graph_data, num_features):
-    sent_tokens = []
-    for g in graph_data:
-        sent_tokens.append(list(g['graph'].nodes))
-    model_w2v = gensim.models.Word2Vec(sent_tokens, min_count=1,vector_size=num_features, window=3)
-    return model_w2v
-
 
 def fasttext_train(graph_data, num_features):
     sent_tokens = []
@@ -231,8 +226,69 @@ def fasttext_train(graph_data, num_features):
     model_fasttext.build_vocab(corpus_iterable=sent_tokens)
     model_fasttext.train(corpus_iterable=sent_tokens, total_examples=len(sent_tokens), epochs=10)
     return model_fasttext
+                     
+def w2v_train(graph_data, num_features):
+    sent_tokens = []
+    for g in graph_data:
+        sent_tokens.append(list(g['graph'].nodes))
+    model_w2v = gensim.models.Word2Vec(sent_tokens, min_count=1,vector_size=num_features, window=3)
+    return model_w2v
 
-    
+def w2v_train_v2(train_text_docs, val_text_docs, test_text_docs, num_features=256):
+
+    X_train, X_val, X_test = [], [], []
+
+    #tokenize_pattern = '(?:[\\(){}[\]=&|^+<>/*%;.\'"?!~-]|(?:\w+|\d+))'
+    tokenize_pattern = "[A-Z]{2,}(?![a-z])|[A-Z][a-z]+(?=[A-Z])|[\'\w\-]+"
+
+    for d in train_text_docs:
+        text_doc = utils.text_normalize(d['doc'], tokenize_pattern)
+        X_train.append(re.findall(tokenize_pattern, text_doc))
+    for d in val_text_docs:
+        text_doc = utils.text_normalize(d['doc'], tokenize_pattern)
+        X_val.append(re.findall(tokenize_pattern, text_doc))
+    for d in test_text_docs:
+        text_doc = utils.text_normalize(d['doc'], tokenize_pattern)
+        X_test.append(re.findall(tokenize_pattern, text_doc))
+
+    model_w2v = gensim.models.Word2Vec(X_train, min_count=1, vector_size=num_features, window=3)
+    words = set(model_w2v.wv.index_to_key)
+    print("X_train_val_test: ", len(X_train), len(X_val), len(X_test))
+    print("words: ", len(words), model_w2v)
+
+    X_train_vect = [[model_w2v.wv[i] for i in ls if i in words] for ls in X_train]
+    X_val_vect = [[model_w2v.wv[i] for i in ls if i in words] for ls in X_val]
+    X_test_vect = [[model_w2v.wv[i] for i in ls if i in words] for ls in X_test]
+
+    X_train_vect_avg = []
+    for vect in X_train_vect:
+        vect = np.array(vect)
+        if vect.size:
+            X_train_vect_avg.append(vect.mean(axis=0))
+        else:
+            X_train_vect_avg.append(np.zeros(num_features, dtype=float))
+
+    X_val_vect_avg = []
+    for vect in X_val_vect:
+        vect = np.array(vect)
+        if vect.size:
+            X_val_vect_avg.append(vect.mean(axis=0))
+        else:
+            X_val_vect_avg.append(np.zeros(num_features, dtype=float))
+
+    X_test_vect_avg = []
+    for vect in X_test_vect:
+        vect = np.array(vect)
+        if vect.size:
+            X_test_vect_avg.append(vect.mean(axis=0))
+        else:
+            X_test_vect_avg.append(np.zeros(num_features, dtype=float))
+
+
+    return model_w2v, X_train_vect_avg, X_val_vect_avg, X_test_vect_avg
+
+
+
 
 
 

@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd 
 import logging
 import traceback  
-import math
+import math 
 from tqdm import tqdm
 import torch
 import torch.nn as nn
@@ -77,6 +77,8 @@ class BuildDataset():
         block = 1
         batch_size = utils.LLM_GET_EMB_BATCH_SIZE_DATALOADER
         num_batches = math.ceil(len(self.graphs_data) / batch_size)
+        oov_cnt_total = 0
+
         for index_out_batch, _ in enumerate(tqdm(range(num_batches))):
             data_list = []
             graphs_data_batch = self.graphs_data[batch_size*(block-1) : batch_size*block]
@@ -87,8 +89,23 @@ class BuildDataset():
                 # Data In memory
                 dataset = [{'id': d['context']['id'], 'label': d['context']['target'], 'text': " ".join(list(d['graph'].nodes))} for d in graphs_data_batch]
                 self.nfi_model = node_feat_init.llm_get_embbedings_2(dataset, subset=self.subset, emb_type='llm_word', device=self.device, save_emb=False, llm_finetuned_name=self.llm_finetuned_name, num_labels=self.num_labels)
-                #self.llm_model_2 = node_feat_init.llm_get_embbedings(dataset, subset=self.subset, emb_type='llm_word', device=self.device, save_emb=False, llm_finetuned_name='andricValdez/multilingual-e5-large-finetuned-autext24', num_labels=self.num_labels)
-
+                # Data in bacthes
+                '''
+                cnt_tokens = 1
+                unique_nodes, lst_nodes, dataset = [], [], []
+                for g in self.graphs_data:
+                    unique_nodes.extend([n for n in list(g['graph'].nodes)])
+                unique_nodes = set(unique_nodes)
+                for idx, node in enumerate(unique_nodes): 
+                    lst_nodes.append(str(node))
+                    if cnt_tokens == 100:
+                        dataset.append({'text': " ".join(lst_nodes)})
+                        lst_nodes = []
+                        cnt_tokens = 0
+                    cnt_tokens += 1
+                self.nfi_model = node_feat_init.llm_get_embbedings_2(dataset, subset=self.subset, emb_type='llm_word', device=self.device, save_emb=False, llm_finetuned_name=self.llm_finetuned_name, num_labels=self.num_labels)
+                #print("unique_nodes: ", len(unique_nodes), " | nfi_model_keys: ", len(self.nfi_model.keys()) , ' | perc: ', (len(self.nfi_model.keys())/len(unique_nodes))*100)
+                '''
             for index_in_batch, g in enumerate(graphs_data_batch):
                 #print(g['graph'])
                 try:
@@ -118,11 +135,13 @@ class BuildDataset():
                     #print("traceback: ", str(traceback.format_exc()))
                 else:
                     ...
-                    #print(g['graph'], " | oov_cnt: ", oov_cnt)
+                    oov_cnt_total += oov_cnt
+                    #print(len(g['graph'].nodes), " | oov_cnt: ", oov_cnt)
 
             torch.save(data_list, f'{self.exp_file_path}embeddings_word_llm/data_{self.subset}_{index_out_batch}.pt')
             block += 1
             #del self.llm_model
+        print("oov_cnt_total: ", oov_cnt_total)
         return data_list
         
 
@@ -142,20 +161,18 @@ class BuildDataset():
                     w_emb = self.nfi_model.wv[node]
                     graph_node_feat.append(w_emb)
                 except Exception as e:
-                    #logger.error('Error: %s', str(e))
                     g['graph'].remove_node(node)
+                    #logger.error('Error: %s', str(e))
                     #graph_node_feat.append(self.get_random_emb(emb_dim=self.num_features))
                     oov_cnt += 1
 
         elif nfi_type == 'llm':
             #print(str(g['doc_id']), len(g['graph'].nodes))
             for n in list(g['graph'].nodes):
-                if str(n) in self.nfi_model[str(g['doc_id'])]['embedding'].keys(): #and n in self.llm_model_2[str(g['doc_id'])]['embedding']:
-                    graph_node_feat.append(
-                        self.nfi_model[str(g['doc_id'])]['embedding'][n] 
-                        #self.nfi_model[str(g['doc_id'])]['embedding']['[CLS]'] 
-                        #self.llm_model_2[str(g['doc_id'])]['embedding'][n]
-                    ) 
+                if str(n) in self.nfi_model[str(g['doc_id'])]['embedding'].keys(): 
+                    graph_node_feat.append(self.nfi_model[str(g['doc_id'])]['embedding'][n]) 
+                #if str(n) in self.nfi_model.keys():
+                #    graph_node_feat.append(self.nfi_model[str(n)])
                 else:
                     g['graph'].remove_node(n)
                     #graph_node_feat.append(self.get_random_emb(emb_dim=self.num_features))
@@ -176,7 +193,7 @@ class BuildDataset():
 
 
     def get_adjacency_info(self, g):
-        adj_tmp = nx.to_scipy_sparse_array(g,  weight='weight', dtype=np.cfloat)
+        adj_tmp = nx.to_scipy_sparse_array(g,  weight='pmi', dtype=np.cfloat) # weight= weight, pmi, tfidf
         #adj_tmp = adj_tmp + adj_tmp.T.multiply(adj_tmp.T > adj_tmp) - adj_tmp.multiply(adj_tmp.T > adj_tmp)
         #adj_normalized = self.normalize_adj(adj_tmp + sp.eye(adj_tmp.shape[0]))
         #return self.sparse_mx_to_torch_sparse_tensor(adj_normalized)['indices']

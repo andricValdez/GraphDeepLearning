@@ -99,7 +99,7 @@ print(doc.text)
 print([token.text for token in doc])
 '''
 
-class Text2Graph():
+class Text2CoocGraph():
     def __init__(self, 
                 graph_type, 
                 apply_prep=True,
@@ -133,47 +133,42 @@ class Text2Graph():
         #self.nlp = spacy.load("en_core_web_sm", exclude=exclude_modules)
         #self.nlp.max_length = 10000000000
 
-        exclude_modules = ["ner", "textcat", "tok2vec"]
+        exclude_modules = ["ner", "textcat"]
         self.nlp = spacy.load('en_core_web_sm', exclude=exclude_modules)
         self.nlp.tokenizer = custom_tokenizer(self.nlp)
         
 
-    def _get_entities(self, doc_instance) -> list:  
+    def _get_entities(self, doc_instance) -> list:
         nodes = []
         for token in doc_instance:
             if token.text in ['[CLS]', '[SEP]', '[UNK]']:
                 continue
-            node = (str(token.lemma_), {}) # (word, {'node_attr': value}) | {'pos_tag': token.pos_} | token.lemma_ | token.text
+            node = (f'{str(token.lemma_)}', {'lemma_': token.lemma_, 'pos_tag': token.pos_}) # (word, {'node_attr': value}) | {'pos_tag': token.pos_} | token.lemma_ | token.text
             nodes.append(node)
-
-        logger.debug("Nodes: %s", nodes)
+        #print(nodes)
         return nodes
 
-
-    def _get_relations(self, doc) -> list:  
+    def _get_relations(self, doc) -> list:
         d_cocc = defaultdict(int)
         text_doc_tokens, edges = [], []
         for token in doc:
             if token.text in ['[CLS]', '[SEP]', '[UNK]']:
                 continue
-            text_doc_tokens.append(token.lemma_)
-        
+            text_doc_tokens.append(f'{str(token.lemma_)}') #  token.lemma_ | token.text
         for i in range(len(text_doc_tokens)):
             word = text_doc_tokens[i]
             next_word = text_doc_tokens[i+1 : i+1 + self.window_size]
             for t in next_word:
                 key = (word, t)
                 d_cocc[key] += 1
-        
+
         unigram_freq = nltk.FreqDist(text_doc_tokens)
         bigram_freq = nltk.FreqDist(d_cocc)
-        for words, value in d_cocc.items():   
+        for words, value in d_cocc.items():
             pmi_val = self._pmi(words, unigram_freq, bigram_freq)
-            edge = (words[0], words[1], {'freq': value, 'pmi': round(pmi_val,4)})  # (word_i, word_j, {'edge_attr': value})
-            edges.append(edge) 
-        logger.debug("Edges: %s", edges)
+            edge = (words[0], words[1], {'freq': value, 'pmi': round(pmi_val,4)})  # freq, pmi | (word_i, word_j, {'edge_attr': value})
+            edges.append(edge)
         return edges
-    
 
     def _pmi(self, words, unigram_freq, bigram_freq):
         prob_word1 = unigram_freq[words[0]] / float(sum(unigram_freq.values()))
@@ -205,7 +200,8 @@ class Text2Graph():
             if self.steps_prep['handle_html_tags']:
                 text = re.compile('<.*?>').sub(r'', text) # remove html tags
             if self.steps_prep['handle_special_chars']:
-                text = re.sub('[^A-Za-z0-9]+ ', ' ', text) # remove special chars
+                text = re.sub('[^A-Za-z0-9]+ ', '', text) # remove special chars
+                #text = re.sub('\W+ ','', text)
                 text = text.replace('"',"")
             if self.steps_prep['handle_stop_words']:
                 text = self._handle_stop_words(text, stop_words=self.stopwords_lang[lang_code]) # remove stop words
