@@ -8,7 +8,7 @@ outputs/*
 outputs/batch_experiments/*
 mlruns/*
 mlartifacts/*
-test-mlflow.py
+src/test-mlflow.py
 
 !logs/.gitkeep
 !datasets/.gitkeep
