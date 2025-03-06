@@ -5,7 +5,7 @@ import utils
 def get_template_comb_dict():
     return {
         'id': None,
-        'dataset_name': None,
+        'dataset_name': 'Autext23',
         'dataset_percent': None,
         'graph_type': None,
         'window_size': None,
@@ -26,20 +26,18 @@ def get_template_comb_dict():
         'gnn_pooling': None,
         'gnn_batch_norm': None,
         'gnn_edge_attr': None,
-        'graph_direction': None,
         'epoch_num': None,
         'cuda_num': 0,
         '_epoch_stop': None,
         '_train_loss': None,
         '_val_loss': None,
-        '_test_loss': None,
-        '_val_acc': None,
+        '_train_acc': None,
+        '_val_last_acc': None,
+        '_val_best_acc': None,
+        '_val_best_epoch_acc': None,
+        '_val_avg_acc': None,
         '_test_acc': None,
-        '_val_f1_macro': None,
-        '_test_f1_macro': None,
-        '_best_test_acc': None,
-        '_best_test_f1score': None,
-        '_epoch_best_test_acc': None,
+        '_test_f1score': None,
         '_exec_time': None,
         '_done': False,
         '_desc': ''
@@ -73,13 +71,12 @@ def build_comb(graph_config):
         d['graph_edge_type'] = comb[17]
         d['dataset_percent'] = comb[18]
         d['graph_node_feat_init_llm'] = comb[19]
-        d['graph_direction'] = comb[20]
         combinations.append(d)
         index += 1
     return combinations
 
 
-def main(dataset, graph_type, dataset_percent):
+def main(graph_type):
 
     # ***** general config
     graph_config = [
@@ -87,22 +84,22 @@ def main(dataset, graph_type, dataset_percent):
         [graph_type], 
         # 1 - graph_node_feat_init LLM, W2V  (see below)
         ['llm'], 
-        # 2 - graph_nfi_embb_size size of LLM or W2V [64,128,256,512,768] 
+        # 2 - graph_nfi_embb_size size of LLM or W2V [64,128,256,512,768] (see below)
         [768],  
         # 3 - gnn_type (see below)     [],   
         [],                                  
         # 4 - gnn_heads (see below)    [],       
         [],                              
         # 5 - gnn_layers_convs     [1,2,3,4]
-        [1, 2, 3],  
+        [0, 1, 2],  
         # 6 - gnn_nhid (# size out embeddings: hidden_channels)    [50, 100, 200]
-        [100, 200],  
+        [50, 100, 200],  
         # 7 - gnn_dense_nhid       [32,64,128]
-        [32, 64], 
+        [32, 64, 128], 
         # 8 - gnn_learning_rate    [0.0001, 0.00001]
-        [0.0001],  
+        [0.00001],  
         # 9 - gnn_dropout      [0.5, 0.8]
-        [0.5],  
+        [0.25, 0.5],  
         # 10 - gnn_pooling     ['gmeanp', 'gmaxp', 'topkp']
         ['gmeanp'], 
         # 11 - gnn_batch_norm      ['None', 'BatchNorm1d', 'LayerNorm']
@@ -110,21 +107,19 @@ def main(dataset, graph_type, dataset_percent):
         # 12 - epoch_num       [100] 
         [100], 
         # 13 - graph cooc window_size      [2,5,10,20],
-        [10],                              
+        [20],                              
         # 14 - graph edge attr cooc (see below)   [False, True],
         [],                          
         # 15 - graph handle special chars    [False, True],
         [False],                          
         # 16 - graph handle stop word    [False, True],
         [False],                          
-        # 17 - graph edge type    ['Graph', 'DiGraph'], (conver in 20. graph_direction)
+        # 17 - graph edge type    ['Graph', 'DiGraph'],
         ['Graph'],                          
-        # 18 - dataset_percent  [20,50,100],
-        [dataset_percent],               
+        # 18 - dataset percent  [20,50,100],
+        [100],               
         # 19 - graph_node_feat_init_llm
-        ['microsoft/deberta-v3-base'],
-        # 20 - graph_direction: directed or undirected
-        ['directed', 'undirected']
+        ['microsoft/deberta-v3-base']
     ]
 
     # ***** GCN specific config
@@ -134,16 +129,16 @@ def main(dataset, graph_type, dataset_percent):
     #combinations = build_comb(*graph_config)
     
     # ***** GAT specific config
-    #graph_config[3] = ['GATConv']   # gnn_type
-    #graph_config[4] = [1, 2]   # gnn_heads [1,2,3] 
-    #graph_config[14] = [False]    # graph_edge_attr_cooc : False, True
-    #combinations = build_comb(graph_config)
+    graph_config[3] = ['GATConv']   # gnn_type
+    graph_config[4] = [0, 1, 2]   # gnn_heads [1,2,3] 
+    graph_config[14] = [False]    # graph_edge_attr_cooc : False, True
+    combinations = build_comb(graph_config)
     
     # ***** GAT specific config
     graph_config[3] = ['TransformerConv']   # gnn_type
-    graph_config[4] = [1, 2]   # gnn_heads [1,2,3] 
-    graph_config[14] = [False, True]    # graph_edge_attr_cooc : False, True
-    combinations = build_comb(graph_config)
+    graph_config[4] = [0, 1, 2]   # gnn_heads [1,2,3] 
+    graph_config[14] = [False]    # graph_edge_attr_cooc : False, True
+    combinations += build_comb(graph_config)
 
 
     # ***** NFI-W2v specific config
@@ -151,13 +146,10 @@ def main(dataset, graph_type, dataset_percent):
     
     # ***** Save data
     comb_df = pd.DataFrame(combinations).sample(frac=1)
-    comb_df['dataset_name'] = dataset
     print(comb_df.info())
-    comb_df.to_csv(utils.OUTPUT_DIR_PATH + f'experiments_{dataset}_{graph_type}_{utils.CURRENT_TIME}.csv', index=False)
+    comb_df.to_csv(utils.OUTPUT_DIR_PATH + f'experiments_{graph_type}_{utils.CURRENT_TIME}.csv', index=False)
 
 
 if __name__ == '__main__':
-    dataset = 'autext23_s2' # autext23, semeval24, coling25, autext23_s2, semeval24_s2
-    dataset_percent = 10
     graph_type = 'hetero' # cooc, hetero, isg
-    main(dataset, graph_type, dataset_percent) 
+    main(graph_type) 

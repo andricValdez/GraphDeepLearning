@@ -1,0 +1,91 @@
+bitacora-res
+
+********************** Exec-Times and Mem (aproc)
+    - Autext23:
+        hetero:
+            build-graph:
+                100perc time: 50min
+                100perc memo: 651M
+            trining:
+                100perc time: 2min
+        cooc:
+            build-graph:
+                100perc time: 55min
+                100perc memo: 7.2G
+            trining:
+                100perc time: 3min
+    - SemEval24:
+        hetero:
+            build-graph:
+                10perc time: 35min
+                10perc memo: 956M
+            trining:
+                10perc time: 3min
+        cooc:
+            build-graph:
+                10perc time: 57min
+                10perc memo: 9.1G
+            trining:
+                10perc time: 6min
+    - Coling25:
+        hetero:
+            build-graph:
+                5perc time: 70min
+                5perc memo: 1.5G
+            trining:
+                5perc time: 10min
+        cooc:
+            build-graph:
+                5perc time: 
+                5perc memo: 
+            trining:
+                5perc time:
+
+
+********************** SemEval
+    configs:
+ 
+
+********************** Autext23
+    configs:
+        llm_name = 'microsoft/deberta-v3-base'        
+        gnn_type='TransformerConv'
+        input_dim = 768 # shared_feature_dim
+        hidden_dim = 100
+        dense_hidden_dim = 64
+        num_layers = 1
+        heads = 1
+        dropout = 0.5
+        output_dim = 2
+        epochs = 100
+        patience = 5 # 5-autext23
+        learnin_rate = 0.00001 # autext23 -> llm: 0.00001 
+        weight_decay = 1e-5
+        batch_size = 128
+        num_neighbors = [40, 30]  # Adjust sampling depth
+        num_workers = 0
+
+    *********** Autext-10perc | window_size=20 | stop_words=False | special_chars=False | min_df=1
+
+    Epoch 184, Loss Train: 0.3085, Loss Val: 0.3566, Val Acc: 0.8414, Val F1Score: 0.8402
+    Early stopping due to no improvement!
+
+    Test Accuracy: 0.8136
+    Test F1Score: 0.8052
+    Test Loss: 0.4936
+
+    *********** Autext-10perc | window_size=10 | stop_words=False | special_chars=False | min_df=1
+    Epoch 180, Loss Train: 0.2849, Loss Val: 0.3923, Val Acc: 0.8284, Val F1Score: 0.8264
+    Early stopping due to no improvement!
+
+    Test Accuracy: 0.8002
+    Test F1Score: 0.7998
+    Test Loss: 0.4997
+
+    *********** Autext-10perc | window_size=20 | stop_words=True | special_chars=False | min_df=1
+    Epoch 99, Loss Train: 0.4440, Loss Val: 0.5232, Val Acc: 0.7567, Val F1Score: 0.7545
+    Early stopping due to no improvement!
+
+    Test Accuracy: 0.6780
+    Test F1Score: 0.6498
+    Test Loss: 0.7093

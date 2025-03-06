@@ -12,9 +12,10 @@ from sklearn.utils import shuffle
 from datetime import datetime
 from joblib import Parallel, delayed
 import time
-from polyglot.detect import Detector
-from polyglot.detect.base import logger as polyglot_logger
+#from polyglot.detect import Detector
+#from polyglot.detect.base import logger as polyglot_logger
 import re
+import contractions
 
 from stylometric import StyloCorpus
 import node_feat_init
@@ -24,7 +25,7 @@ from nltk.corpus import stopwords
 nltk.download('stopwords')
 nltk.download('punkt_tab')
 
-polyglot_logger.setLevel("ERROR")
+#polyglot_logger.setLevel("ERROR")
 
 #************************************* CONFIGS
 logging.basicConfig(stream=sys.stdout, level=logging.INFO, format="%(asctime)s; - %(levelname)s; - %(message)s")
@@ -40,7 +41,7 @@ TODAY_DATE = datetime.today().strftime('%Y-%m-%d')
 CURRENT_TIME = datetime.today().strftime('%Y%m%d%H%M%S')
 LANGUAGE = 'en' #es, en, fr
 
-LLM_GET_EMB_BATCH_SIZE_DATALOADER = 128
+LLM_GET_EMB_BATCH_SIZE_DATALOADER = 64
 
 
 #************************************* UTILS
@@ -261,8 +262,8 @@ def llm_get_embbedings(text_data, exp_file_path, subset, emb_type, device, save_
     output_train_path = f"{exp_file_path}/autext_{subset}_embeddings.jsonl"
     node_feat_init.llm_get_embbedings_2(text_data_lst, subset=subset, emb_type=emb_type, device=device, output_path=output_train_path, save_emb=True, llm_finetuned_name=llm_finetuned_name, num_labels=num_labels)
 
+
 def text_normalize(text, tokenize_pattern):
-    
     # *** text to lower case
     text = text.lower() 
     # *** remove blank spaces
@@ -271,9 +272,114 @@ def text_normalize(text, tokenize_pattern):
     text = re.compile('<.*?>').sub(r'', text) 
     # *** remove special chars
     #text = re.sub('[^A-Za-z0-9]+ ', '', text) 
-    #text = text.replace('"',"")
+    #text = text.replace('"',"") 
     # *** remove stop words
     #text_doc_tokens = re.findall(tokenize_pattern, text)
     #without_stopwords = [word for word in text_doc_tokens if not word.lower().strip() in set(stopwords.words('english'))]
     #text = " ".join(without_stopwords)
     return text
+
+
+def to_lowercase(text):
+    return text.lower()
+
+def handle_contraction_apostraphes(text):
+    text = re.sub('([A-Za-z]+)[\'`]([A-Za-z]+)', r'\1'r'\2', text)
+    return text
+
+def handle_contraction(text):
+  expanded_words = []
+  for word in text.split():
+    expanded_words.append(contractions.fix(word))
+  return ' '.join(expanded_words)
+
+def remove_blank_spaces(text):
+    return re.sub(r'\s+', ' ', text).strip() # remove blank spaces
+
+def remove_html_tags(text):
+    return re.compile('<.*?>').sub(r'', text) # remove html tags
+
+def remove_special_chars(text):
+    text = re.sub('[^A-Za-z0-9]+ ', ' ', text) # remove special chars
+    text = re.sub('\W+', ' ', text) # remove special chars
+    text = text.replace('"'," ")
+    text = text.replace('('," ")
+    text = re.sub(r'\s+', ' ', text).strip() # remove blank spaces
+
+def remove_stop_words(text):
+    # remove stop words
+    tokens = nltk.word_tokenize(text)
+    without_stopwords = [word for word in tokens if not word.lower().strip() in set(stopwords.words('english'))]
+    text = " ".join(without_stopwords)
+
+def text_normalize_v2(text):
+  text = to_lowercase(text)
+  text = handle_contraction(text)
+  text = handle_contraction_apostraphes(text)
+  text = remove_blank_spaces(text)
+  text = remove_html_tags(text)
+  #text = remove_special_chars(text)
+  #text = remove_stop_words(text)
+  return text
+
+
+
+def get_masks_hetero_graph(graph, corpus_all_text_docs, set_idxs):
+  # show corpus_graph_docs
+  train_mask, val_mask, test_mask, y_mask = [], [], [], []
+  t1,t2,t3 = [],[],[]
+
+  # set idxs
+  train_idx = set_idxs['train']
+  val_idx = set_idxs['train'] + set_idxs['val']
+  test_idx = set_idxs['train'] + set_idxs['val'] + set_idxs['test']
+
+  # get train_mask
+  doc_cnt = 0
+  for idx, node in enumerate(graph['graph'].nodes(data=True)):
+    if node[0].startswith("D-"):
+      doc_cnt += 1
+      if doc_cnt <= train_idx:
+        t1.append(node[0])
+        train_mask.append(True)
+        continue
+    train_mask.append(False)
+
+  # get val_mask
+  doc_cnt = 0
+  for idx, node in enumerate(graph['graph'].nodes(data=True)):
+    if node[0].startswith("D-"):
+      doc_cnt += 1
+      if doc_cnt > train_idx and doc_cnt <= val_idx:
+        t2.append(node[0])
+        val_mask.append(True)
+        continue
+    val_mask.append(False)
+
+  # get test_mask
+  doc_cnt = 0
+  for idx, node in enumerate(graph['graph'].nodes(data=True)):
+    if node[0].startswith("D-"):
+      doc_cnt += 1
+      if doc_cnt > train_idx and doc_cnt > val_idx and doc_cnt <= test_idx:
+        t3.append(node[0])
+        test_mask.append(True)
+        continue
+    test_mask.append(False)
+
+  # obtain y ground truth
+  for idx, node in enumerate(graph['graph'].nodes(data=True)):
+    #print((node[0], list(graph['graph'].neighbors(node[0])))) # nodes per node
+    if node[0].startswith("D-"):
+      doc_id = node[0].split('-')[1]
+      doc = corpus_all_text_docs[int(doc_id)-1]
+      y_mask.append(doc["context"]['target'])
+      #print((node[0], list(graph['graph'].neighbors(node[0])))) # nodes per doc
+    else:
+      y_mask.append(False)
+
+  print("masks_hetero_graph docs: ", doc_cnt)
+  print("train_docs: ", len(t1))
+  print("val_docs:   ", len(t2))
+  print("test_docs:  ", len(t3))
+  return train_mask, val_mask, test_mask, y_mask

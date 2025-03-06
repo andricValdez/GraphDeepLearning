@@ -24,6 +24,12 @@ from spacy.lang.xx import MultiLanguage
 from spacy.cli import download
 from spacy.tokenizer import Tokenizer
 from spacy.util import compile_prefix_regex, compile_infix_regex, compile_suffix_regex
+import contractions
+from collections import Counter, defaultdict
+from sklearn.feature_extraction.text import TfidfVectorizer
+from nltk.stem import PorterStemmer
+import itertools
+from math import log
 
 import utils
 
@@ -106,7 +112,9 @@ class Text2CoocGraph():
                 parallel_exec=False, 
                 window_size=1,
                 language='en', 
-                steps_preprocessing={}
+                steps_preprocessing={},
+                min_word_freq=1, 
+                node_type='text'
             ):
         """Constructor method
         """
@@ -116,6 +124,9 @@ class Text2CoocGraph():
         self.parallel_exec = parallel_exec
         self.language = language
         self.steps_prep = steps_preprocessing
+        self.stemming = PorterStemmer()
+        self.min_word_freq = min_word_freq
+        self.node_type = node_type
         self.stopwords_lang = {
             "en": self._set_stopwords(utils.INPUT_DIR_PATH + '/stopwords_en.txt'),
             "es": self._set_stopwords(utils.INPUT_DIR_PATH + '/stopwords_es.txt'),
@@ -136,25 +147,44 @@ class Text2CoocGraph():
         exclude_modules = ["ner", "textcat"]
         self.nlp = spacy.load('en_core_web_sm', exclude=exclude_modules)
         self.nlp.tokenizer = custom_tokenizer(self.nlp)
-        
+    
+    def _set_node_type(self, token):
+        ntype = f'{token.text}'
+        if self.node_type == 'lemma':
+            ntype = f'{token.lemma_}'
+        elif self.node_type == 'stem':
+            ntype = f'{self.stemming.stem(token.text)}'
+        elif self.node_type == 'text_pos':
+            ntype = f'{token.text}_{token.pos_}'
+        elif self.node_type == 'lemma_pos':
+            ntype = f'{token.lemma_}_{token.pos_}'
+        else:
+            ntype = f'{token.text}'
+        return str(ntype)
 
-    def _get_entities(self, doc_instance) -> list:
+
+    def _get_entities(self, doc_instance, vocab) -> list:
         nodes = []
         for token in doc_instance:
+            if token.text not in vocab:
+                continue
             if token.text in ['[CLS]', '[SEP]', '[UNK]']:
                 continue
-            node = (f'{str(token.lemma_)}', {'lemma_': token.lemma_, 'pos_tag': token.pos_}) # (word, {'node_attr': value}) | {'pos_tag': token.pos_} | token.lemma_ | token.text
+            node = (f'{self._set_node_type(token)}', {'lemma_': token.lemma_, 'pos_tag': token.pos_}) # (word, {'node_attr': value}) | {'pos_tag': token.pos_} | token.lemma_ | token.text
             nodes.append(node)
         #print(nodes)
         return nodes
 
-    def _get_relations(self, doc) -> list:
+
+    def _get_relations(self, doc, vocab) -> list:
         d_cocc = defaultdict(int)
         text_doc_tokens, edges = [], []
         for token in doc:
+            if token.text not in vocab:
+                continue
             if token.text in ['[CLS]', '[SEP]', '[UNK]']:
                 continue
-            text_doc_tokens.append(f'{str(token.lemma_)}') #  token.lemma_ | token.text
+            text_doc_tokens.append(f'{self._set_node_type(token)}') #  token.lemma_ | token.text
         for i in range(len(text_doc_tokens)):
             word = text_doc_tokens[i]
             next_word = text_doc_tokens[i+1 : i+1 + self.window_size]
@@ -166,7 +196,7 @@ class Text2CoocGraph():
         bigram_freq = nltk.FreqDist(d_cocc)
         for words, value in d_cocc.items():
             pmi_val = self._pmi(words, unigram_freq, bigram_freq)
-            edge = (words[0], words[1], {'freq': value, 'pmi': round(pmi_val,4)})  # freq, pmi | (word_i, word_j, {'edge_attr': value})
+            edge = (words[0], words[1], {'freq': value, 'weight': round(pmi_val,4)})  # freq, pmi | (word_i, word_j, {'edge_attr': value})
             edges.append(edge)
         return edges
 
@@ -190,6 +220,13 @@ class Text2CoocGraph():
         without_stopwords = [word for word in tokens if not word.lower().strip() in stop_words]
         return " ".join(without_stopwords)
 
+    def _handle_contractions(self, text) -> str:
+        text = re.sub('([A-Za-z]+)[\'`]([A-Za-z]+)', r'\1'r'\2', text)
+        expanded_words = []
+        tokens = nltk.word_tokenize(text)
+        for token in tokens:
+            expanded_words.append(contractions.fix(token))
+        return ' '.join(expanded_words)
 
     def _text_normalize(self, text: str, lang_code: str) -> list:
         if self.apply_prep:
@@ -199,13 +236,26 @@ class Text2CoocGraph():
                 text = re.sub(r'\s+', ' ', text).strip() # remove blank spaces
             if self.steps_prep['handle_html_tags']:
                 text = re.compile('<.*?>').sub(r'', text) # remove html tags
+            #if self.steps_prep['handle_contractions']:
+            if True:
+                text = self._handle_contractions(text) # handle contraction
             if self.steps_prep['handle_special_chars']:
-                text = re.sub('[^A-Za-z0-9]+ ', '', text) # remove special chars
-                #text = re.sub('\W+ ','', text)
-                text = text.replace('"',"")
-            if self.steps_prep['handle_stop_words']:
+                text = re.sub('[^A-Za-z0-9]+ ', ' ', text) # remove special chars
+                text = re.sub('\W+ ',' ', text)
+                text = text.replace('"'," ")
+                text = re.sub(r'\s+', ' ', text).strip() # remove blank spaces
                 text = self._handle_stop_words(text, stop_words=self.stopwords_lang[lang_code]) # remove stop words
         return text
+
+
+    def _min_word_freq(self, doc):
+        vocab = []
+        for token in doc:
+            vocab.append(self._set_node_type(token))
+        vocab = { x: count for x, count in Counter(vocab).items() if count >= self.min_word_freq }
+        #print(len(list(vocab.keys())), vocab)
+        vocab = set(list(vocab.keys()))
+        return vocab
 
 
     def _nlp_pipeline(self, docs: list, params = {'get_multilevel_lang_features': False}):
@@ -238,10 +288,13 @@ class Text2CoocGraph():
             'status': 'success'
         }
         try:
+            # ******************************************** TEST - min_word_freq
+            vocab = self._min_word_freq(doc_instance['doc'])
+
             # get_entities
-            nodes = self._get_entities(doc_instance['doc'])
+            nodes = self._get_entities(doc_instance['doc'], vocab)
             # get_relations
-            edges = self._get_relations(doc_instance['doc'])
+            edges = self._get_relations(doc_instance['doc'], vocab)
             # build graph
             graph = self._build_graph(nodes, edges)
             output_dict['number_of_edges'] += graph.number_of_edges()
@@ -297,4 +350,268 @@ class Text2CoocGraph():
 
             logger.info("Done transformations")
         
+        return corpus_output_graph
+
+
+class Text2HeteroGraph():
+    def __init__(self, 
+                 graph_type, 
+                 apply_prep=True, 
+                 parallel_exec=False, 
+                 window_size=1, 
+                 language='en', 
+                 steps_preprocessing={}, 
+                 min_word_freq=1, 
+                 node_type='text'
+            ):
+        
+        self.apply_prep = apply_prep
+        self.window_size = window_size
+        self.graph_type = graph_type
+        self.parallel_exec = parallel_exec
+        self.language = language
+        self.steps_prep = steps_preprocessing
+        #self.stop_words = set(stopwords.words('english'))
+        self.stemming = PorterStemmer()
+        self.min_word_freq = min_word_freq
+        self.node_type = node_type
+        self.stopwords_lang = {
+            "en": self._set_stopwords(utils.INPUT_DIR_PATH + '/stopwords_en.txt'),
+            "es": self._set_stopwords(utils.INPUT_DIR_PATH + '/stopwords_es.txt')
+        }
+        
+        exclude_modules = ["ner", "textcat"]
+        self.nlp = spacy.load('en_core_web_sm', exclude=exclude_modules)
+        self.nlp.tokenizer = custom_tokenizer(self.nlp)
+
+    def _set_node_type(self, token):
+        ntype = f'{token.text}'
+        if self.node_type == 'lemma':
+            ntype = f'{token.lemma_}'
+        elif self.node_type == 'stem':
+            ntype = f'{self.stemming.stem(token.text)}'
+        elif self.node_type == 'text_pos':
+            ntype = f'{token.text}_{token.pos_}'
+        elif self.node_type == 'lemma_pos':
+            ntype = f'{token.lemma_}_{token.pos_}'
+        else:
+            ntype = f'{token.text}'
+        return str(ntype)
+    
+    def _set_stopwords(self, stoword_path):
+        stopwords = []
+        for line in codecs.open(stoword_path, encoding="utf-8"):
+            # Remove black space if they exist
+            stopwords.append(line.strip())
+        return dict.fromkeys(stopwords, True)
+    
+    def __get_windows(self, doc_words_list, window_size):
+        word_window_freq = defaultdict(int)
+        word_pair_count = defaultdict(int)
+        len_doc_words_list = len(doc_words_list)
+        len_windows = 0
+
+        for i, doc in enumerate(doc_words_list):
+            windows = []
+            doc_words = doc['words']
+            length = len(doc_words)
+
+            if length <= window_size:
+                windows.append(doc_words)
+            else:
+                for j in range(length - window_size + 1):
+                    window = doc_words[j: j + window_size]
+                    windows.append(list(set(window)))
+            for window in windows:
+                for word in window:
+                    word_window_freq[word] += 1
+                for word_pair in itertools.combinations(window, 2):
+                    word_pair_count[word_pair] += 1
+            len_windows += len(windows)
+
+        return word_window_freq, word_pair_count, len_windows
+
+    def __get_pmi(self, doc_words_list, window_size):
+        word_window_freq, word_pair_count, len_windows = self.__get_windows(doc_words_list, window_size)
+        word_to_word_pmi = []
+        for word_pair, count in word_pair_count.items():
+            word_freq_i = word_window_freq[word_pair[0]]
+            word_freq_j = word_window_freq[word_pair[1]]
+            pmi = log((1.0 * count / len_windows) / (1.0 * word_freq_i * word_freq_j/(len_windows * len_windows)))
+            if pmi <= 0:
+                continue
+            word_to_word_pmi.append((word_pair[0], word_pair[1], {'weight': round(pmi, 2)}))
+        return word_to_word_pmi
+
+    def __get_tfidf(self, corpus_docs_list, vocab):
+        vectorizer = TfidfVectorizer(vocabulary=vocab, norm=None, use_idf=True, smooth_idf=False, sublinear_tf=False, lowercase=False, tokenizer=None)
+        tfidf = vectorizer.fit_transform(corpus_docs_list)
+        words_docs_tfids = []
+        len_tfidf = tfidf.shape[0]
+
+        for ind, row in enumerate(tfidf):
+            for col_ind, value in zip(row.indices, row.data):
+                edge = ('D-' + str(ind+1), vocab[col_ind], {'weight': round(value, 2)})
+                words_docs_tfids.append(edge)
+        return words_docs_tfids
+
+    def _handle_stop_words(self, text) -> str:
+        tokens = nltk.word_tokenize(text)
+        without_stopwords = [word for word in tokens if not word.lower().strip() in self.stop_words]
+        return " ".join(without_stopwords)
+
+    def _handle_contractions(self, text) -> str:
+        text = re.sub('([A-Za-z]+)[\'`]([A-Za-z]+)', r'\1'r'\2', text)
+        expanded_words = []
+        tokens = nltk.word_tokenize(text)
+        for token in tokens:
+          expanded_words.append(contractions.fix(token))
+        return ' '.join(expanded_words)
+
+    def _nlp_pipeline(self, docs: list, params = {'get_multilevel_lang_features': False}):
+        doc_tuples = []
+        Doc.set_extension("multilevel_lang_info", default=[], force=True)
+        for doc, context in list(self.nlp.pipe(docs, as_tuples=True, n_process=4, batch_size=1000)):
+            if params['get_multilevel_lang_features'] == True:
+                doc._.multilevel_lang_info = self.get_multilevel_lang_features(doc)
+            doc_tuples.append((doc, context))
+        return doc_tuples
+
+    def _text_normalize(self, text: str, lang_code: str) -> list:
+        if self.apply_prep:
+            if self.steps_prep['to_lowercase']:
+                text = text.lower() # text to lower case
+            if self.steps_prep['handle_blank_spaces']:
+                text = re.sub(r'\s+', ' ', text).strip() # remove blank spaces
+            if self.steps_prep['handle_html_tags']:
+                text = re.compile('<.*?>').sub(r'', text) # remove html tags
+            if self.steps_prep['handle_contractions']:
+                text = self._handle_contractions(text) # handle contractions
+            if self.steps_prep['handle_special_chars']:
+                text = re.sub('[^A-Za-z0-9]+ ', ' ', text) # remove special chars
+                text = re.sub('\W+', ' ', text) # remove special chars
+                text = text.replace('"'," ")
+                text = text.replace('('," ")
+                text = re.sub(r'\s+', ' ', text).strip() # remove blank spaces
+            if self.steps_prep['handle_stop_words']:
+                #text = self._handle_stop_words(text) # remove stop words
+                text = self._handle_stop_words(text, stop_words=self.stopwords_lang[lang_code]) # remove stop words
+
+        return text
+
+    def _min_word_freq(self, docs):
+        vocab, corpus_docs_list, doc_words_list = [], [], []
+        for doc, context in docs:
+            for token in doc:
+                ntype = self._set_node_type(token)
+                vocab.append(ntype)
+
+        vocab = { x: count for x, count in Counter(vocab).items() if count >= self.min_word_freq }
+        #print(len(list(vocab.keys())), vocab)
+        vocab = set(list(vocab.keys()))
+
+        for doc, context in docs:
+            doc_tokens = []
+            for token in doc:
+                ntype = self._set_node_type(token)
+                if ntype in vocab:
+                    doc_tokens.append(ntype) # text,  lemma_, self.stemming.stem()
+
+            corpus_docs_list.append(str(" ".join(doc_tokens)))
+            doc_words_list.append({'doc': context['id'], 'words': doc_tokens})
+
+        return vocab, corpus_docs_list, doc_words_list
+
+    def __get_entities(self, doc_words_list: list) -> list:
+        nodes = []
+        for d in doc_words_list:
+            node_doc =  ('D-' + str(d['doc']), {})
+            nodes.append(node_doc)
+            for word in d['words']:
+                node_word = (str(word), {})
+                nodes.append(node_word)
+        return nodes
+
+    def __get_relations(self, corpus_docs_list, doc_words_list, vocab) -> list:
+        edges = []
+        #tfidf
+        word_to_doc_tfidf = self.__get_tfidf(corpus_docs_list, vocab)
+        edges.extend(word_to_doc_tfidf)
+        #pmi
+        word_to_word_pmi = self.__get_pmi(doc_words_list, self.window_size)
+        edges.extend(word_to_word_pmi)
+        return edges
+
+    def __build_graph(self, nodes: list, edges: list) -> networkx:
+        if self.graph_type == 'DiGraph':
+            graph = nx.DiGraph()
+        else:
+            graph = nx.Graph()
+        graph.add_nodes_from(nodes)
+        graph.add_edges_from(edges)
+        return graph
+
+    def __transform_pipeline(self, corpus_docs: list) -> list:
+        output_dict = {
+            'doc_id': 1,
+            'graph': None,
+            'number_of_edges': 0,
+            'number_of_nodes': 0,
+            'status': 'success'
+        }
+        try:
+            #1. text preprocessing
+            corpus_docs_list = []
+            doc_words_list = []
+            len_corpus_docs = len(corpus_docs)
+            vocab = set()
+            delayed_func = []
+            prep_docs = []
+            lang_code = 'en'
+
+            for doc_data in corpus_docs:
+                if self.apply_prep == True:
+                    doc_data['doc'] = self._text_normalize(doc_data['doc'], lang_code)
+                prep_docs.append((doc_data['doc'], {'id': doc_data['id']}))
+
+            docs = self._nlp_pipeline(prep_docs)
+
+            # ******************************************** TEST - min_word_freq
+            vocab, corpus_docs_list, doc_words_list = self._min_word_freq(docs)
+            # ******************************************** TEST - min_word_freq
+
+            '''
+            for doc, context in docs:
+                doc_tokens = [str(token.text) for token in doc] # text,  lemma_, self.stemming.stem()
+                corpus_docs_list.append(str(" ".join(doc_tokens)))
+                doc_words_list.append({'doc': context['id'], 'words': doc_tokens})
+                vocab.update(set(doc_tokens))
+            '''
+
+            #2. get node/entities
+            nodes = self.__get_entities(doc_words_list)
+            #3. get edges/relations
+            edges = self.__get_relations(corpus_docs_list, doc_words_list, list(vocab))
+            #4. build graph
+            graph = self.__build_graph(nodes, edges)
+            output_dict['number_of_edges'] = graph.number_of_edges()
+            output_dict['number_of_nodes'] = graph.number_of_nodes()
+            output_dict['graph'] = graph
+        except Exception as e:
+            print('Error: %s', str(e))
+            output_dict['status'] = 'fail'
+        finally:
+            corpus_docs_list = None
+            doc_words_list = None
+            vocab = None
+            prep_docs = None
+            nodes = None
+            edges = None
+            return output_dict
+
+    def transform(self, corpus_docs: list) -> list:
+        print("Init transformations: Text to Heterogeneous Graph")
+        print("Transforming %s text documents...", len(corpus_docs))
+        corpus_output_graph = [self.__transform_pipeline(corpus_docs)]
+        print("Done transformations")
         return corpus_output_graph

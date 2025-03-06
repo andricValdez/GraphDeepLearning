@@ -9,6 +9,7 @@ import evaluate
 from torch.utils.data import DataLoader 
 from torch.optim import AdamW
 import torch
+from collections import defaultdict
 from tqdm.auto import tqdm
 from tqdm import tqdm
 from sklearn.metrics import accuracy_score, f1_score
@@ -38,7 +39,7 @@ LLM_HF_FINETUNED_NAME = "andricValdez/bert-base-multilingual-cased-finetuned-aut
 
 
 def llm_tokenize_function(examples, tokenizer):
-    return tokenizer(examples["text"], padding="max_length", truncation=True, return_tensors='pt')
+    return tokenizer(examples["text"], padding=True, truncation=True, return_tensors='pt', max_length=512)
  
 
 def llm_compute_metrics(pred):
@@ -49,7 +50,7 @@ def llm_compute_metrics(pred):
     return {"accuracy": acc, "f1": f1}
 
 
-def llm_fine_tuning(model_name, train_set_df, val_set_df, device, llm_to_finetune=LLM_HF_NAME, mode='finetune', num_labels=6):
+def llm_fine_tuning(model_name, train_set_df, val_set_df, device, llm_to_finetune=LLM_HF_NAME, mode='finetune', num_labels=2):
 
     model_name = f"{llm_to_finetune}-finetuned-{model_name}"   
     dataset = DatasetDict({
@@ -64,7 +65,7 @@ def llm_fine_tuning(model_name, train_set_df, val_set_df, device, llm_to_finetun
     tokenized_dataset.set_format("torch")
     print(tokenized_dataset)
 
-    batch_size = 32
+    batch_size = 16
     model = (AutoModelForSequenceClassification.from_pretrained(llm_to_finetune, num_labels=num_labels).to(device))
     logging_steps = len(tokenized_dataset["train"]) // batch_size
     
@@ -92,7 +93,6 @@ def llm_fine_tuning(model_name, train_set_df, val_set_df, device, llm_to_finetun
     )
     if mode == 'finetune':
         trainer.train()
-        trainer.evaluate()
         preds_output = trainer.predict(tokenized_dataset["validation"])
         print(preds_output.metrics)
         trainer.push_to_hub()
@@ -102,6 +102,7 @@ def llm_fine_tuning(model_name, train_set_df, val_set_df, device, llm_to_finetun
         print(preds_output.metrics)
         y_preds = np.argmax(preds_output.predictions, axis=1)
         print(y_preds[:10])
+
 
 def llm_get_embbedings(dataset, subset, emb_type='llm_cls', device='cpu', output_path='', save_emb=False, llm_finetuned_name=LLM_HF_FINETUNED_NAME, num_labels=2):
 
@@ -183,9 +184,10 @@ def llm_get_embbedings_2(dataset, subset, emb_type='llm_cls', device='cpu', outp
     model.eval()
 
     if emb_type == 'llm_cls':
-        with torch.no_grad():
-            embeddings_lst = []
-            for row in tqdm(dataset):
+        
+        embeddings_lst = []
+        for row in tqdm(dataset):
+            with torch.no_grad():
                 inputs = tokenizer(row["text"], return_tensors='pt', padding=True, truncation=True, max_length=512)
                 inputs.to(device)
                 outputs_model = model(**inputs, output_hidden_states=True)
@@ -218,6 +220,18 @@ def llm_get_embbedings_2(dataset, subset, emb_type='llm_cls', device='cpu', outp
         return embeddings_word_dict
         #utils.save_jsonl([embeddings_word_dict], utils.OUTPUT_DIR_PATH + 'word_emb_test.jsonl')
 
+    if emb_type == 'llm_cls_2':
+        with torch.no_grad():
+            embeddings_lst = []
+            for row in tqdm(dataset):
+                inputs = tokenizer(row["text"], return_tensors='pt', padding=True, truncation=True, max_length=512)
+                inputs.to(device)
+                outputs_model = model(**inputs, output_hidden_states=True)
+                last_hidden_state = outputs_model.hidden_states[-1]
+                embedding = last_hidden_state[0,0,:].cpu().detach().numpy().tolist()
+                embeddings_lst.append(embedding)
+            return embeddings_lst
+      
 def fasttext_train(graph_data, num_features):
     sent_tokens = []
     for g in graph_data:
@@ -226,13 +240,15 @@ def fasttext_train(graph_data, num_features):
     model_fasttext.build_vocab(corpus_iterable=sent_tokens)
     model_fasttext.train(corpus_iterable=sent_tokens, total_examples=len(sent_tokens), epochs=10)
     return model_fasttext
-                     
+
+
 def w2v_train(graph_data, num_features):
     sent_tokens = []
     for g in graph_data:
         sent_tokens.append(list(g['graph'].nodes))
     model_w2v = gensim.models.Word2Vec(sent_tokens, min_count=1,vector_size=num_features, window=3)
     return model_w2v
+
 
 def w2v_train_v2(train_text_docs, val_text_docs, test_text_docs, num_features=256):
 
@@ -241,7 +257,7 @@ def w2v_train_v2(train_text_docs, val_text_docs, test_text_docs, num_features=25
     #tokenize_pattern = '(?:[\\(){}[\]=&|^+<>/*%;.\'"?!~-]|(?:\w+|\d+))'
     tokenize_pattern = "[A-Z]{2,}(?![a-z])|[A-Z][a-z]+(?=[A-Z])|[\'\w\-]+"
 
-    for d in train_text_docs:
+    for d in train_text_docs: 
         text_doc = utils.text_normalize(d['doc'], tokenize_pattern)
         X_train.append(re.findall(tokenize_pattern, text_doc))
     for d in val_text_docs:
@@ -287,7 +303,103 @@ def w2v_train_v2(train_text_docs, val_text_docs, test_text_docs, num_features=25
 
     return model_w2v, X_train_vect_avg, X_val_vect_avg, X_test_vect_avg
 
+def get_document_embedding_w2v(doc, w2v_model, embedding_dim=300):
 
+    word_embeddings = [w2v_model.wv[word] for word in doc if word in w2v_model.wv]
+
+    if len(word_embeddings) > 0:
+        return np.mean(word_embeddings, axis=0)  # Average of word embeddings
+    else:
+        return np.zeros(embedding_dim)  # Zero vector for OOV words
+
+
+def llm_get_embbedings_3(dataset, device, model, tokenizer, avg_llm_found_tokens=True, text2graph_type='cooc'):
+    model.eval()
+
+    embeddings_word_dict = {}
+    token_freq = defaultdict(int)
+
+    iter = enumerate(dataset)
+    if text2graph_type == 'hetero':
+        iter = enumerate(tqdm(dataset))
+
+    for idx, text in iter: # hetero
+        text = utils.text_normalize_v2(text['doc'])
+        with torch.no_grad():
+            encoded_text = tokenizer.encode_plus(text, return_tensors="pt", padding=True, truncation=True)
+            encoded_text.to(device)
+            outputs_model = model(**encoded_text, output_hidden_states=True)
+            last_hidden_state = outputs_model.hidden_states[-1]
+
+            for i in range(0, len(last_hidden_state)):
+                raw_tokens = [tokenizer.decode([token_id]) for token_id in encoded_text['input_ids'][i]]
+                for token, embedding in zip(raw_tokens, last_hidden_state[i]):
+                    token = str(token).strip()
+                    token_freq[token] += 1
+                    current_emb = embedding.cpu().detach().numpy().tolist()
+
+                    if avg_llm_found_tokens: # avg token
+                        if token not in embeddings_word_dict.keys():
+                            embeddings_word_dict[token] = current_emb
+                        else:
+                            embeddings_word_dict[token] = np.add.reduce([embeddings_word_dict[token], current_emb])
+                    else: # get last token emb found
+                        embeddings_word_dict[token] = current_emb
+
+    if avg_llm_found_tokens:
+        for token, freq in token_freq.items():
+            embeddings_word_dict[token] = np.divide(embeddings_word_dict[token], freq).tolist()
+
+    return embeddings_word_dict
+
+
+def get_emb_word_nodes(embeddings_word_dict, graph, tokenizer, avg_llm_not_found_tokens=True, text2graph_type='cooc'):
+    embeddings_word_dict_avg = {}
+    not_found_tokens_dic = {}
+    nodes = list(graph['graph'].nodes)
+    cnt_not_found_nodes = 0
+
+    iter = nodes
+    if text2graph_type == 'hetero':
+        iter = tqdm(nodes)
+
+    for node in iter:
+        node = str(node).strip()
+        if node.startswith("D-"):
+            continue
+        if node in embeddings_word_dict.keys():
+            embeddings_word_dict_avg[node] = embeddings_word_dict[node]
+        else:
+            cnt_not_found_nodes += 1
+            node_tokens = tokenizer.encode_plus(node, return_tensors="pt", padding=True, truncation=True)
+            raw_tokens = [tokenizer.decode([token_id]) for token_id in node_tokens['input_ids'][0]]
+            not_found_tokens_dic[node] = raw_tokens[1:-1]
+
+    if avg_llm_not_found_tokens == True:
+        iter = not_found_tokens_dic.keys()
+        if text2graph_type == 'hetero':
+            iter = tqdm(not_found_tokens_dic.keys())
+
+        for node in iter: # hetero
+            #print(node, not_found_tokens_dic[node])
+            if str(node).startswith("D-"):
+                continue
+            if str(node) in embeddings_word_dict_avg.keys():
+                continue
+            try:
+                avg_emb = []
+                for w_emb in not_found_tokens_dic[node]:
+                    if w_emb not in embeddings_word_dict.keys():
+                        continue
+                    avg_emb.append(embeddings_word_dict[w_emb])
+                embeddings_word_dict_avg[str(node).strip()] = np.mean(avg_emb, axis=0).flatten().tolist()
+                #print(len(embeddings_word_dict_avg[node]))
+            except Exception as err:
+                print("****** err: ", err)
+                ...
+
+    #print("embeddings_word_dict_avg: ", len(embeddings_word_dict_avg.keys()), embeddings_word_dict_avg.keys())
+    return embeddings_word_dict_avg
 
 
 

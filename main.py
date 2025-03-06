@@ -11,6 +11,7 @@ import traceback
 import glob
 from tqdm import tqdm 
 import torch
+import re
 import networkx as nx
 import scipy as sp
 from scipy.sparse import coo_array 
@@ -27,6 +28,7 @@ import torch.utils.data as data_utils
 from torch.nn.modules.module import Module
 import networkx as nx
 import gc
+from gensim.models import Word2Vec
 
 from sklearn.metrics import f1_score, accuracy_score, precision_score, recall_score
 from datasets import load_dataset
@@ -43,6 +45,7 @@ from sklearn.naive_bayes import GaussianNB, MultinomialNB
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.calibration import CalibratedClassifierCV
 
+import test_utils
 import utils
 import baselines
 import gnn
@@ -65,20 +68,64 @@ experiment_id = "0"
 run = client.create_run(experiment_id)
 
 
+
+# currrent_llm: FacebookAI/roberta-base
 cuda_num = 0
-cut_off_dataset = 100
-cut_off_test_dataset = 100
-graph_type = 'cooc' # cooc, hetero
-dataset_name = 'semeval24' # semeval24, coling24, autext23, autext23_s2
+cut_off_dataset = 10 # 25
+cut_off_test_dataset = 5
+text2graph_type = 'cooc' # cooc, hetero
+dataset_name = 'semeval24' # semeval24, autext23, coling24, autext23_s2
+graph_trans_gnn = None # True, False, None
+build_dataset_gnn = False # True, False
+
 num_classes = 2 # num output classes
 num_features = 768 # llm: 768 | w2v: 128, 256, 512, 768
-batch_size_gnn = 256 # 16 -> semeval | 64 -> autext
+batch_size_gnn = 64 # 16 -> semeval | 64 -> autext
 edge_features = False
-
+edge_dim = 1
 nfi = 'llm' # llm, w2v, fasttext, random
 
+
+'''
+# currrent_llm: FacebookAI/roberta-base
+cuda_num = 1
+cut_off_dataset = 10
+cut_off_test_dataset = 5
+text2graph_type = 'cooc' # cooc, hetero
+dataset_name = 'semeval24' # semeval24, autext23, coling24, autext23_s2
+graph_trans_gnn = None # True, False, None
+build_dataset_gnn = False # True, False
+
+num_classes = 2 # num output classes
+num_features = 768 # llm: 768 | w2v: 128, 256, 512, 768
+batch_size_gnn = 64 # 16 -> semeval | 64 -> autext
+edge_features = False
+edge_dim = 1
+nfi = 'llm' # llm, w2v, fasttext, random
+
+'''
+
+'''
+# currrent_llm:
+cuda_num = 1
+cut_off_dataset = 1 
+cut_off_test_dataset = 1
+text2graph_type = 'hetero' # cooc, hetero
+dataset_name = 'autext23' # semeval24, autext23, coling24, autext23_s2
+graph_trans_gnn = None # True, False, None
+build_dataset_gnn = False # True, False
+
+num_classes = 2 # num output classes
+num_features = 768 # llm: 768 | w2v: 128, 256, 512, 768
+batch_size_gnn = 64 # 16 -> semeval | 64 -> autext
+edge_features = False
+edge_dim = 1
+nfi = 'llm' # llm, w2v, fasttext, random
+'''
 # google-bert/bert-base-uncased
 # FacebookAI/roberta-base
+# microsoft/deberta-v3-base
+# deepseek-ai/DeepSeek-V3
 # andricValdez/bert-base-uncased-finetuned-autext23
 # andricValdez/roberta-base-finetuned-autext23
 # andricValdez/bert-base-uncased-finetuned-autext23_sub2
@@ -86,7 +133,7 @@ nfi = 'llm' # llm, w2v, fasttext, random
 # andricValdez/bert-base-uncased-finetuned-semeval24
 # andricValdez/roberta-base-finetuned-semeval24
 # andricValdez/roberta-base-finetuned-coling24
-llm_model_name = 'andricValdez/roberta-base-finetuned-autext23_sub2' 
+llm_model_name = 'microsoft/deberta-v3-base' 
 
 device = torch.device(f"cuda:{cuda_num}" if torch.cuda.is_available() else "cpu")
 #device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -96,11 +143,14 @@ print("device: ", device)
 graph_params = {
     'graph_type': 'DiGraph',  
     'window_size': 5,
+    'min_word_freq': 1, 
+    'node_type': 'text', # text, lemma, text_pos, lemma_pos
     'apply_prep': True, 
     'steps_preprocessing': {
         "to_lowercase": True, 
         "handle_blank_spaces": True,
         "handle_html_tags": True,
+        "handle_contractions": True,
         "handle_special_chars": False,
         "handle_stop_words": False,
     },
@@ -108,7 +158,7 @@ graph_params = {
 }
 
 mlflow.set_experiment(f"GNN - {dataset_name}")
-run_description = f"""Run experiment for GNN Classification Task using dataset {dataset_name} using {cut_off_dataset} % of the dataset and a {graph_type} graph type"""
+run_description = f"""Run experiment for GNN Classification Task using dataset {dataset_name} using {cut_off_dataset} % of the dataset and a {text2graph_type} graph type"""
 run_tags = {
     'mlflow.note.content': run_description,
     'mlflow.source.type': "LOCAL",
@@ -121,123 +171,124 @@ def main():
     ...
 
 
-
 def extract_embeddings_subtask1():
     # NOTA: el prefijo "autext_" se quedó para todos los dataset, no solo para el de autexttification
 
     # ****************************** READ DATASET SEMEVAL 2024
-    
-    dataset_name = 'semeval24'
-    autext_train_set = utils.read_json(dir_path=utils.DATASET_DIR + 'semeval2024/subtask1/subtaskA_train_monolingual.jsonl')
-    autext_val_set = utils.read_json(dir_path=utils.DATASET_DIR + 'semeval2024/subtask1/subtaskA_dev_monolingual.jsonl')
-    autext_test_set = utils.read_json(dir_path=utils.DATASET_DIR + 'semeval2024/subtask1/subtaskA_test_monolingual.jsonl')
-    autext_train_set = autext_train_set.sample(frac=1).reset_index(drop=True)
-    autext_val_set = autext_val_set.sample(frac=1).reset_index(drop=True)
-    autext_test_set = autext_test_set.sample(frac=1).reset_index(drop=True)
-    print(autext_train_set.info())
-    print("label_distro_train_val_test: ", autext_train_set.value_counts('label'), autext_val_set.value_counts('label'), autext_test_set.value_counts('label'))
-    
-    autext_train_set['word_len'] = autext_train_set['text'].str.split().str.len()
-    autext_val_set['word_len'] = autext_val_set['text'].str.split().str.len()
-    autext_test_set['word_len'] = autext_test_set['text'].str.split().str.len()
-    print("\n min_max_avg_token Train: ", autext_train_set['word_len'].min(), autext_train_set['word_len'].max(), int(autext_train_set['word_len'].mean()))
-    print("min_max_avg_token Val:   ", autext_val_set['word_len'].min(), autext_val_set['word_len'].max(),  int(autext_val_set['word_len'].mean()))
-    print("min_max_avg_token Test:  ", autext_test_set['word_len'].min(), autext_test_set['word_len'].max(), int(autext_test_set['word_len'].mean()))
+    if dataset_name == 'semeval24':
+        #dataset_name = 'semeval24'
+        autext_train_set = utils.read_json(dir_path=utils.DATASET_DIR + 'semeval2024/subtask1/train_set.jsonl')
+        autext_val_set = utils.read_json(dir_path=utils.DATASET_DIR + 'semeval2024/subtask1/dev_set.jsonl')
+        autext_test_set = utils.read_json(dir_path=utils.DATASET_DIR + 'semeval2024/subtask1/test_set.jsonl')
+        autext_train_set = autext_train_set.sample(frac=1).reset_index(drop=True)
+        autext_val_set = autext_val_set.sample(frac=1).reset_index(drop=True)
+        autext_test_set = autext_test_set.sample(frac=1).reset_index(drop=True)
+        print(autext_train_set.info())
+        print("label_distro_train_val_test: ", autext_train_set.value_counts('label'), autext_val_set.value_counts('label'), autext_test_set.value_counts('label'))
+        
+        autext_train_set['word_len'] = autext_train_set['text'].str.split().str.len()
+        autext_val_set['word_len'] = autext_val_set['text'].str.split().str.len()
+        autext_test_set['word_len'] = autext_test_set['text'].str.split().str.len()
+        print("\n min_max_avg_token Train: ", autext_train_set['word_len'].min(), autext_train_set['word_len'].max(), int(autext_train_set['word_len'].mean()))
+        print("min_max_avg_token Val:   ", autext_val_set['word_len'].min(), autext_val_set['word_len'].max(),  int(autext_val_set['word_len'].mean()))
+        print("min_max_avg_token Test:  ", autext_test_set['word_len'].min(), autext_test_set['word_len'].max(), int(autext_test_set['word_len'].mean()))
 
-    autext_train_set = autext_train_set[(autext_train_set['word_len'] >= 10) & (autext_train_set['word_len'] <= 1500)]
-    autext_val_set = autext_val_set[(autext_val_set['word_len'] >= 10) & (autext_val_set['word_len'] <= 1500)]
-    #autext_train_set, autext_val_set = train_test_split(autext_train_set, test_size=0.3)
-    print("label_distro_train_val_test: ", autext_train_set.value_counts('label'), autext_val_set.value_counts('label'), autext_test_set.value_counts('label'))
-    print(autext_train_set.nlargest(5, ['word_len']) )
-    #autext_val_set = pd.concat([autext_val_set, autext_val_set_2], axis=0)
+        min_token_len = 1
+        max_token_len = 5000
+        autext_train_set = autext_train_set[(autext_train_set['word_len'] >= min_token_len) & (autext_train_set['word_len'] <= max_token_len)]
+        autext_val_set = autext_val_set[(autext_val_set['word_len'] >= min_token_len) & (autext_val_set['word_len'] <= max_token_len)]
+        #autext_train_set, autext_val_set = train_test_split(autext_train_set, test_size=0.3)
+        print("label_distro_train_val_test: ", autext_train_set.value_counts('label'), autext_val_set.value_counts('label'), autext_test_set.value_counts('label'))
+        print(autext_train_set.nlargest(5, ['word_len']) )
+        #autext_val_set = pd.concat([autext_val_set, autext_val_set_2], axis=0)
 
-    print(autext_train_set.info())
-    print(autext_val_set.info())
-    print(autext_test_set.info())
-    print(autext_train_set['model'].value_counts())
-    print(autext_val_set['model'].value_counts())
-    
-    '''
-    autext_train_set = utils.read_json(dir_path=utils.DATASET_DIR + 'semeval2024/original/subtaskA_train_monolingual.jsonl')
-    autext_val_set = utils.read_json(dir_path=utils.DATASET_DIR + 'semeval2024/original/subtaskA_dev_monolingual.jsonl')
-    autext_test_set = utils.read_json(dir_path=utils.DATASET_DIR + 'semeval2024/original/subtaskA_test_monolingual.jsonl')
-    autext_train_set = shuffle(autext_train_set)
-    autext_val_set = shuffle(autext_val_set)
-    autext_test_set = shuffle(autext_test_set)
+        print(autext_train_set.info())
+        print(autext_val_set.info())
+        print(autext_test_set.info())
+        print(autext_train_set['model'].value_counts())
+        print(autext_val_set['model'].value_counts())
+        
+        '''
+        autext_train_set = utils.read_json(dir_path=utils.DATASET_DIR + 'semeval2024/original/subtaskA_train_monolingual.jsonl')
+        autext_val_set = utils.read_json(dir_path=utils.DATASET_DIR + 'semeval2024/original/subtaskA_dev_monolingual.jsonl')
+        autext_test_set = utils.read_json(dir_path=utils.DATASET_DIR + 'semeval2024/original/subtaskA_test_monolingual.jsonl')
+        autext_train_set = shuffle(autext_train_set)
+        autext_val_set = shuffle(autext_val_set)
+        autext_test_set = shuffle(autext_test_set)
 
-    autext_train_set = autext_train_set.to_dict('records')
-    autext_val_set = autext_val_set.to_dict('records')
-    autext_test_set = autext_test_set.to_dict('records')
-    utils.save_jsonl(autext_train_set, file_path=utils.DATASET_DIR + 'semeval2024/subtask1/subtaskA_train_monolingual.jsonl')
-    utils.save_jsonl(autext_val_set, file_path=utils.DATASET_DIR + 'semeval2024/subtask1/subtaskA_dev_monolingual.jsonl')
-    utils.save_jsonl(autext_test_set, file_path=utils.DATASET_DIR + 'semeval2024/subtask1/subtaskA_test_monolingual.jsonl')
-    return
-    '''
+        autext_train_set = autext_train_set.to_dict('records')
+        autext_val_set = autext_val_set.to_dict('records')
+        autext_test_set = autext_test_set.to_dict('records')
+        utils.save_jsonl(autext_train_set, file_path=utils.DATASET_DIR + 'semeval2024/subtask1/subtaskA_train_monolingual.jsonl')
+        utils.save_jsonl(autext_val_set, file_path=utils.DATASET_DIR + 'semeval2024/subtask1/subtaskA_dev_monolingual.jsonl')
+        utils.save_jsonl(autext_test_set, file_path=utils.DATASET_DIR + 'semeval2024/subtask1/subtaskA_test_monolingual.jsonl')
+        return
+        '''
     # ****************************** READ DATASET COLING 2024
-    '''
-    dataset_name = 'coling24' 
-    autext_train_set = utils.read_json(dir_path=f'{utils.DATASET_DIR}coling2024/en_train.jsonl')
-    autext_val_set = utils.read_json(dir_path=f'{utils.DATASET_DIR}coling2024/en_dev.jsonl')
-    autext_test_set = utils.read_json(dir_path=f'{utils.DATASET_DIR}coling2024/test_set_en_with_label.jsonl')
-    autext_train_set = autext_train_set.sample(frac=1).reset_index(drop=True)
-    autext_val_set = autext_val_set.sample(frac=1).reset_index(drop=True)
-    autext_test_set = autext_test_set.sample(frac=1).reset_index(drop=True)
-    print(autext_train_set.info())
-    autext_test_set = autext_test_set[['testset_id', 'label', 'text']]
-    print("distro_train_val_test: ", autext_train_set.shape, autext_val_set.shape, autext_test_set.shape)
-    
-    autext_train_set['word_len'] = autext_train_set['text'].str.split().str.len()
-    autext_val_set['word_len'] = autext_val_set['text'].str.split().str.len()
-    autext_test_set['word_len'] = autext_test_set['text'].str.split().str.len()
-    print("min_max_avg_token Train: ", autext_train_set['word_len'].min(), autext_train_set['word_len'].max(), int(autext_train_set['word_len'].mean()))
-    print("min_max_avg_token Val:   ", autext_val_set['word_len'].min(), autext_val_set['word_len'].max(),  int(autext_val_set['word_len'].mean()))
-    print("min_max_avg_token Test:  ", autext_test_set['word_len'].min(), autext_test_set['word_len'].max(), int(autext_test_set['word_len'].mean()))
+    if dataset_name in ['coling24']:   
+        #dataset_name = 'coling24' 
+        autext_train_set = utils.read_json(dir_path=f'{utils.DATASET_DIR}coling2024/en_train.jsonl')
+        autext_val_set = utils.read_json(dir_path=f'{utils.DATASET_DIR}coling2024/en_dev.jsonl')
+        autext_test_set = utils.read_json(dir_path=f'{utils.DATASET_DIR}coling2024/test_set_en_with_label.jsonl')
+        autext_train_set = autext_train_set.sample(frac=1).reset_index(drop=True)
+        autext_val_set = autext_val_set.sample(frac=1).reset_index(drop=True)
+        autext_test_set = autext_test_set.sample(frac=1).reset_index(drop=True)
+        print(autext_train_set.info())
+        autext_test_set = autext_test_set[['testset_id', 'label', 'text']]
+        print("distro_train_val_test: ", autext_train_set.shape, autext_val_set.shape, autext_test_set.shape)
+        
+        autext_train_set['word_len'] = autext_train_set['text'].str.split().str.len()
+        autext_val_set['word_len'] = autext_val_set['text'].str.split().str.len()
+        autext_test_set['word_len'] = autext_test_set['text'].str.split().str.len()
+        print("min_max_avg_token Train: ", autext_train_set['word_len'].min(), autext_train_set['word_len'].max(), int(autext_train_set['word_len'].mean()))
+        print("min_max_avg_token Val:   ", autext_val_set['word_len'].min(), autext_val_set['word_len'].max(),  int(autext_val_set['word_len'].mean()))
+        print("min_max_avg_token Test:  ", autext_test_set['word_len'].min(), autext_test_set['word_len'].max(), int(autext_test_set['word_len'].mean()))
 
-    min_token_text = 10
-    max_token_text = 1500
-    autext_train_set = autext_train_set[(autext_train_set['word_len'] >= min_token_text) & (autext_train_set['word_len'] <= max_token_text)]
-    autext_val_set = autext_val_set[(autext_val_set['word_len'] >= min_token_text) & (autext_val_set['word_len'] <= max_token_text)]
-    print("label_distro_train_val_test: ", autext_train_set.value_counts('label'), autext_val_set.value_counts('label'), autext_test_set.value_counts('label'))
-    #print(autext_train_set.nlargest(5, ['word_len']) )
+        min_token_text = 1
+        max_token_text = 5000
+        autext_train_set = autext_train_set[(autext_train_set['word_len'] >= min_token_text) & (autext_train_set['word_len'] <= max_token_text)]
+        autext_val_set = autext_val_set[(autext_val_set['word_len'] >= min_token_text) & (autext_val_set['word_len'] <= max_token_text)]
+        print("label_distro_train_val_test: ", autext_train_set.value_counts('label'), autext_val_set.value_counts('label'), autext_test_set.value_counts('label'))
+        #print(autext_train_set.nlargest(5, ['word_len']) )
 
-    print("distro_train_val_test: ", autext_train_set.shape, autext_val_set.shape, autext_test_set.shape)
-    #print(autext_train_set['model'].value_counts())
-    #print(autext_val_set['model'].value_counts())
-    '''
-    
+        print("distro_train_val_test: ", autext_train_set.shape, autext_val_set.shape, autext_test_set.shape)
+        #print(autext_train_set['model'].value_counts())
+        #print(autext_val_set['model'].value_counts())
     # ****************************** READ DATASET AUTEXT 2023
-    '''
-    dataset_name = 'autext23' # autext23, autext23_s2
-    subtask = 'subtask1' # subtask1, subtask2
+    if dataset_name in ['autext23', 'autext23_s2']:
+        
+        #dataset_name = 'autext23' # autext23, autext23_s2
+        subtask = 'subtask1' # subtask1, subtask2
+        
+        autext_train_set = utils.read_csv(file_path=f'{utils.DATASET_DIR}autext2023/{subtask}/train_set.csv') 
+        autext_val_set = utils.read_csv(file_path=f'{utils.DATASET_DIR}autext2023/{subtask}/val_set.csv') 
+        autext_test_set = utils.read_csv(file_path=f'{utils.DATASET_DIR}autext2023/{subtask}/test_set.csv') 
+        print(autext_train_set.info())
+        print("distro_train_val_test: ", autext_train_set.shape, autext_val_set.shape, autext_test_set.shape)
+        print("label_distro_train_val_test: ", autext_train_set.value_counts('label'), autext_val_set.value_counts('label'), autext_test_set.value_counts('label'))
+        
+        autext_train_set['word_len'] = autext_train_set['text'].str.split().str.len()
+        autext_val_set['word_len'] = autext_val_set['text'].str.split().str.len()
+        autext_test_set['word_len'] = autext_test_set['text'].str.split().str.len()
+        print("min_max_avg_token Train: ", autext_train_set['word_len'].min(), autext_train_set['word_len'].max(), int(autext_train_set['word_len'].mean()))
+        print("min_max_avg_token Val:   ", autext_val_set['word_len'].min(), autext_val_set['word_len'].max(),  int(autext_val_set['word_len'].mean()))
+        print("min_max_avg_token Test:  ", autext_test_set['word_len'].min(), autext_test_set['word_len'].max(), int(autext_test_set['word_len'].mean()))
+        
+        '''
+        print(40*'*', 'Dataset Distro-Partition')
+        subtask = 'subtask1' # subtask1, subtask2
+        dataset = load_dataset("symanto/autextification2023", 'detection_en') # ['detection_en', 'attribution_en', 'detection_es', 'attribution_es']
+        train_set = pd.DataFrame(dataset['train'])
+        autext_test_set = pd.DataFrame(dataset['test'])
+        autext_train_set, autext_val_set = train_test_split(train_set, test_size=0.3)
+        print("autext_train_set: ", autext_train_set.info())
+        print("autext_val_set:  ", autext_val_set.info())
+        autext_train_set.to_csv(f'{utils.DATASET_DIR}autext2023/{subtask}/train_set.csv')
+        autext_val_set.to_csv(f'{utils.DATASET_DIR}autext2023/{subtask}/val_set.csv')
+        autext_test_set.to_csv(f'{utils.DATASET_DIR}autext2023/{subtask}/test_set.csv')
+        return
+        '''
     
-    autext_train_set = utils.read_csv(file_path=f'{utils.DATASET_DIR}autext2023/{subtask}/train_set.csv') 
-    autext_val_set = utils.read_csv(file_path=f'{utils.DATASET_DIR}autext2023/{subtask}/val_set.csv') 
-    autext_test_set = utils.read_csv(file_path=f'{utils.DATASET_DIR}autext2023/{subtask}/test_set.csv') 
-    print(autext_train_set.info())
-    print("distro_train_val_test: ", autext_train_set.shape, autext_val_set.shape, autext_test_set.shape)
-    print("label_distro_train_val_test: ", autext_train_set.value_counts('label'), autext_val_set.value_counts('label'), autext_test_set.value_counts('label'))
-    
-    autext_train_set['word_len'] = autext_train_set['text'].str.split().str.len()
-    autext_val_set['word_len'] = autext_val_set['text'].str.split().str.len()
-    autext_test_set['word_len'] = autext_test_set['text'].str.split().str.len()
-    print("min_max_avg_token Train: ", autext_train_set['word_len'].min(), autext_train_set['word_len'].max(), int(autext_train_set['word_len'].mean()))
-    print("min_max_avg_token Val:   ", autext_val_set['word_len'].min(), autext_val_set['word_len'].max(),  int(autext_val_set['word_len'].mean()))
-    print("min_max_avg_token Test:  ", autext_test_set['word_len'].min(), autext_test_set['word_len'].max(), int(autext_test_set['word_len'].mean()))
-    '''
-    '''
-    print(40*'*', 'Dataset Distro-Partition')
-    subtask = 'subtask1' # subtask1, subtask2
-    dataset = load_dataset("symanto/autextification2023", 'detection_en') # ['detection_en', 'attribution_en', 'detection_es', 'attribution_es']
-    train_set = pd.DataFrame(dataset['train'])
-    autext_test_set = pd.DataFrame(dataset['test'])
-    autext_train_set, autext_val_set = train_test_split(train_set, test_size=0.3)
-    print("autext_train_set: ", autext_train_set.info())
-    print("autext_val_set:  ", autext_val_set.info())
-    autext_train_set.to_csv(f'{utils.DATASET_DIR}autext2023/{subtask}/train_set.csv')
-    autext_val_set.to_csv(f'{utils.DATASET_DIR}autext2023/{subtask}/val_set.csv')
-    autext_test_set.to_csv(f'{utils.DATASET_DIR}autext2023/{subtask}/test_set.csv')
-    return
-    '''
     # ****************************** READ DATASET AUTEXT 2024
     '''
     dataset_name = 'autext24'
@@ -258,19 +309,34 @@ def extract_embeddings_subtask1():
     
     '''
 
-    # ****************************** FINE TUNE LLM
+    # ****************************** PROCESS AUTEXT DATASET && CUTOF
+    # *** TRAIN
+    cut_dataset_train = len(autext_train_set) * (int(cut_off_dataset) / 100) # cut_off_dataset
+    autext_train_set = autext_train_set[:int(cut_dataset_train)]
+    # *** VAL
+    cut_dataset_val = len(autext_val_set) * (int(cut_off_dataset) / 100)
+    autext_val_set = autext_val_set[:int(cut_dataset_val)]
+    # *** TEST
+    cut_dataset_test = len(autext_test_set) * (int(cut_off_dataset) / 100)
+    autext_test_set = autext_test_set[:int(cut_dataset_test)]
+
+    print("cutoff_distro_train_val_test: ", len(autext_train_set), len(autext_val_set), len(autext_test_set))
+    print("label_distro_train_val_test: ", autext_train_set.value_counts('label'), autext_val_set.value_counts('label'), autext_test_set.value_counts('label'))
+        
     '''
-    for llm in ['andricValdez/bert-base-uncased-finetuned-autext23', 'andricValdez/roberta-base-finetuned-autext23']:
+    # ****************************** FINE TUNE LLM
+    for llm in ['microsoft/deberta-v3-base']:
         node_feat_init.llm_fine_tuning(
-            model_name = 'autext23',  # autext23, autext24, semeval24, coling24
+            model_name = 'coling24',  # autext23, autext24, semeval24, coling24
             train_set_df = autext_train_set, 
-            val_set_df = autext_test_set, # autext_val_set, autext_test_set
+            val_set_df = autext_val_set, # autext_val_set, autext_test_set
             device = device,
             llm_to_finetune = llm,
             num_labels = 2,
-            mode = 'inference' # finetune, inference
+            mode = 'finetune' # finetune, inference
         )
     return
+    # microsoft/deberta-v3-base 
     # google-bert/bert-base-uncased
     # FacebookAI/roberta-base
     # andricValdez/bert-base-uncased-finetuned-autext23
@@ -281,27 +347,15 @@ def extract_embeddings_subtask1():
     # andricValdez/roberta-base-finetuned-semeval24 
     # andricValdez/roberta-base-finetuned-coling24
     '''
-    # ****************************** PROCESS AUTEXT DATASET && CUTOF
-    # *** TRAIN
-    cut_dataset_train = len(autext_train_set) * (int(cut_off_dataset) / 100)
-    autext_train_set = autext_train_set[:int(cut_dataset_train)]
-    # *** VAL
-    cut_dataset_val = len(autext_val_set) * (int(cut_off_dataset) / 100)
-    #cut_dataset_val = len(autext_val_set) * (int(100) / 100)
-    autext_val_set = autext_val_set[:int(cut_dataset_val)]
-    # *** TEST
-    cut_dataset_test = len(autext_test_set) * (int(cut_off_dataset) / 100)
-    autext_test_set = autext_test_set[:int(cut_dataset_test)]
-
-    print("label_distro_train_val_test: ", autext_train_set.value_counts('label'), autext_val_set.value_counts('label'), autext_test_set.value_counts('label'))
-
     # cooc
     train_text_docs = utils.process_dataset(autext_train_set)
     val_text_docs = utils.process_dataset(autext_val_set)
     test_text_docs = utils.process_dataset(autext_test_set)
 
     # hetero
-    #all_text_docs = utils.process_dataset(pd.concat([autext_train_set, autext_val_set, autext_test_set], axis=0))
+    all_sets = pd.concat([autext_train_set, autext_val_set, autext_test_set], axis=0)
+    all_text_docs = utils.process_dataset(all_sets)
+    print(all_sets.info())
 
     # validation class balance for cut_off_dataset  and get some stats
     cnt_0, cnt_1 = 0, 0
@@ -323,7 +377,7 @@ def extract_embeddings_subtask1():
     # ****************************** BASELINES
     '''
     print(40*'*', 'Train and Test ML baseline models')
-    models = ['LinearSVC','MultinomialNB','LogisticRegression','SGDClassifier','xgboost']
+    models = ['LinearSVC','MultinomialNB','LogisticRegression']
     #models = ['xgboost']
     for model in models:
         print(20*'*', 'model: ', model)
@@ -364,34 +418,67 @@ def extract_embeddings_subtask1():
     return
     '''
     # ****************************** GRAPH NEURAL NETWORK - ONE RUNNING
-    if graph_type == 'cooc':
+    if text2graph_type == 'cooc':
         t2g_instance = text2graph.Text2CoocGraph(
-            graph_type = graph_params['graph_type'], window_size = graph_params['window_size'], apply_prep = graph_params['apply_prep'], 
-            steps_preprocessing = graph_params['steps_preprocessing'], language = graph_params['language'],
+            graph_type = graph_params['graph_type'], 
+            window_size = graph_params['window_size'], 
+            apply_prep = graph_params['apply_prep'], 
+            steps_preprocessing = graph_params['steps_preprocessing'], 
+            language = graph_params['language'],
+            min_word_freq = graph_params['min_word_freq'], 
+            node_type = graph_params['node_type']
         )
-    if graph_type == 'hetero':
-        ...
+    if text2graph_type == 'hetero':
+        t2g_instance = text2graph.Text2HeteroGraph(
+            graph_type = graph_params['graph_type'], 
+            window_size = graph_params['window_size'], 
+            apply_prep = graph_params['apply_prep'], 
+            steps_preprocessing = graph_params['steps_preprocessing'], 
+            language = graph_params['language'],
+            min_word_freq = graph_params['min_word_freq'], 
+            node_type = graph_params['node_type']
+        )
 
 
     # ****************************** BASELINES W2v
-    '''
+    
     #*** GET ground truth
     y_train = np.asarray(autext_train_set['label'].to_list()[:], dtype=np.float32).reshape(-1, 1)
     y_val = np.asarray(autext_val_set['label'].to_list()[:], dtype=np.float32).reshape(-1, 1)
     y_test = np.asarray(autext_test_set['label'].to_list()[:], dtype=np.float32).reshape(-1, 1)
     print("y-train-val-test: ", y_train.shape, y_val.shape, y_test.shape)
 
-    #*** GET w2v doc embeddings
-    vector_size = 128
-    model_w2v, X_train_vect_avg, X_val_vect_avg, X_test_vect_avg = node_feat_init.w2v_train_v2(train_text_docs[:], val_text_docs, test_text_docs, num_features=vector_size)
-    X_train = np.asarray(X_train_vect_avg)
-    X_val = np.asarray(X_val_vect_avg)
-    X_test = np.asarray(X_test_vect_avg)
-    print("X-train-val-test: ", X_train.shape, X_val.shape, X_test.shape)
+    #*** GET w2v doc embeddings V1
+    #model_w2v, X_train_vect_avg, X_val_vect_avg, X_test_vect_avg = node_feat_init.w2v_train_v2(train_text_docs[:], val_text_docs, test_text_docs, num_features=vector_size)
+    #X_train = np.asarray(X_train_vect_avg)
+    #X_val = np.asarray(X_val_vect_avg)
+    #X_test = np.asarray(X_test_vect_avg)
+    #print("X-train-val-test: ", X_train.shape, X_val.shape, X_test.shape)
+
+    #*** GET w2v doc embeddings V2
+    train_text_norm_tokenized, val_text_norm_tokenized, test_text_norm_tokenized = [], [], []
+    tokenize_pattern = "[A-Z]{2,}(?![a-z])|[A-Z][a-z]+(?=[A-Z])|[\'\w\-]+"
+    for d in train_text_docs: 
+        text_nrom = test_utils.text_normalize(d['doc'])
+        train_text_norm_tokenized.append(re.findall(tokenize_pattern, text_nrom))
+    for d in val_text_docs: 
+        text_nrom = test_utils.text_normalize(d['doc'])
+        val_text_norm_tokenized.append(re.findall(tokenize_pattern, text_nrom))
+    for d in test_text_docs: 
+        text_nrom = test_utils.text_normalize(d['doc'])
+        test_text_norm_tokenized.append(re.findall(tokenize_pattern, text_nrom))
+    
+    vector_size = 150
+    w2v_model = Word2Vec(sentences=train_text_norm_tokenized, vector_size=vector_size, window=5, min_count=1, workers=4)
+
+    X_train = np.array([node_feat_init.get_document_embedding_w2v(doc, w2v_model) for doc in tqdm(train_text_norm_tokenized, desc="Processing train docs")])
+    X_val = np.array([node_feat_init.get_document_embedding_w2v(doc, w2v_model) for doc in tqdm(val_text_norm_tokenized, desc="Processing val docs")])
+    X_test = np.array([node_feat_init.get_document_embedding_w2v(doc, w2v_model) for doc in tqdm(test_text_norm_tokenized, desc="Processing test docs")])
 
     #*** TRAIN classifier
-    #clf = LinearSVC()
-    clf = xgb.XGBClassifier(n_jobs=-1)
+    #clf = LogisticRegression()
+    clf = LinearSVC()
+    #clf = xgb.XGBClassifier(n_jobs=-1)
     clf_model = clf.fit(X_train, y_train)
 
     #*** PREDICT val-test
@@ -408,41 +495,44 @@ def extract_embeddings_subtask1():
         round(precision_score(y_test, y_test_pred), 3), round(recall_score(y_test, y_test_pred), 3), round(accuracy_score(y_test, y_test_pred), 3), round(f1_score(y_test, y_test_pred, average='macro'), 3)))
 
     return
-    '''
+    
+    
     exp_file_name = "test"
     dataset_partition = f'{dataset_name}_{cut_off_dataset}perc' # perc | perc_go_cls | perc_go_e5
-    exp_file_path = f'{utils.OUTPUT_DIR_PATH}{exp_file_name}_{dataset_partition}/'
+    exp_file_path = f'{utils.OUTPUT_DIR_PATH}{exp_file_name}_{text2graph_type}_{dataset_partition}/'
     #utils.delete_dir_files(exp_file_path)
     utils.create_expriment_dirs(exp_file_path)
 
     # ML Flow Setting
-    mlflow.set_tag("mlflow.runName", f"run_{cut_off_dataset}perc_{graph_type}_{nfi}")
+    mlflow.set_tag("mlflow.runName", f"run_{cut_off_dataset}perc_{text2graph_type}_{nfi}")
     mlflow.log_param('graph_params', graph_params)
     mlflow.log_param('exp_file_path', exp_file_path)
-    mlflow.log_param('graph_type', graph_type)
-    mlflow.log_param('graph_token', 'lemma') # lemma, text
-    mlflow.set_tags({"dataset": dataset_name, "graph_type": graph_type, "cut_off": cut_off_dataset, "nfi": nfi })
+    mlflow.log_param('text2graph_type', text2graph_type)
+    mlflow.log_param('graph_token', 'text') # lemma, text
+    mlflow.set_tags({"dataset": dataset_name, "text2graph_type": text2graph_type, "cut_off": cut_off_dataset, "nfi": nfi })
     if nfi == 'llm':
         mlflow.log_param('llm_model_name', llm_model_name)
-    
+
+    print(graph_trans_gnn, build_dataset_gnn)
     gnn.graph_neural_network( 
         exp_file_name = 'test', 
         dataset_partition = dataset_partition,
         exp_file_path = exp_file_path,
-        graph_trans = None, # True, False, None
+        graph_trans = graph_trans_gnn, # True, False, None
         nfi = nfi,
         cut_off_dataset = cut_off_dataset, 
+        text2graph_type = text2graph_type,
         t2g_instance = t2g_instance,
         train_text_docs =  train_text_docs[ : int(len(train_text_docs) * (int(100) / 100))], #train_text_docs
         val_text_docs = val_text_docs[ : int(len(val_text_docs) * (int(100) / 100))], # val_text_docs
         test_text_docs = test_text_docs[ : int(len(test_text_docs) * (int(100) / 100))], # test_text_docs
-        #all_text_docs = all_text_docs,
+        all_text_docs = all_text_docs,
         device = device,
         edge_features = edge_features,
-        edge_dim = 2,
+        edge_dim = edge_dim,
         num_features = num_features, 
         batch_size_gnn = batch_size_gnn,
-        build_dataset = False, # True, False
+        build_dataset = build_dataset_gnn, # True, False
         save_data = True,
         llm_finetuned_name = llm_model_name,
         num_classes = num_classes,
@@ -482,6 +572,7 @@ def extract_embeddings_subtask1():
         llm_finetuned_name=llm_model_name, num_labels=num_classes)
     '''
 
+
 def train_clf_model_batch_subtask():
     #dataset_name = 'semeval24' # autext23, autext23_s2, semeval24
     #cuda_num = 0
@@ -490,7 +581,8 @@ def train_clf_model_batch_subtask():
     train_set_mode = 'train' # train | train_all
     # test_autext24_all_100perc, subtask2/test_autext24_subtask2_all_100perc
     #exp_file_path = utils.OUTPUT_DIR_PATH + f'subtask2/test_autext24_subtask2_all_100perc'
-    exp_file_path = utils.OUTPUT_DIR_PATH + f'test_{dataset_name}_{cut_off_dataset}perc'
+    
+    exp_file_path = utils.OUTPUT_DIR_PATH + f'test_{text2graph_type}_{dataset_name}_{cut_off_dataset}perc'
 
     # delete
     feat_types = [
@@ -654,7 +746,7 @@ def test_eval_subtask():
 
     if subtask == 'subtask_1':
         dataset_partition = f'{dataset_name}_{cut_off_dataset}perc'
-        exp_file_path = f'{utils.OUTPUT_DIR_PATH}{exp_file_name}_{dataset_partition}/'
+        exp_file_path = f'{utils.OUTPUT_DIR_PATH}{exp_file_name}_{text2graph_type}_{dataset_partition}/'
         if dataset_name == 'semeval24': 
             autext_test_set = utils.read_json(dir_path=utils.DATASET_DIR + 'semeval2024/subtask1/subtaskA_test_monolingual.jsonl')
         if dataset_name == 'autext23': 
@@ -665,7 +757,7 @@ def test_eval_subtask():
     if subtask == 'subtask_2':
         clf_model_name_ml = f'XGBClassifier_train_{feat_type}' # XGBClassifier_train_ | LogisticRegression_train_ | SGDClassifier_train_ | LinearSVC_train_
         dataset_partition = f'{dataset_name}_s2_{cut_off_dataset}perc'
-        exp_file_path = f'{utils.OUTPUT_DIR_PATH}{exp_file_name}_{dataset_partition}/'
+        exp_file_path = f'{utils.OUTPUT_DIR_PATH}{exp_file_name}_{text2graph_type}_{dataset_partition}/'
         autext_test_set = utils.read_csv(file_path=f'{utils.DATASET_DIR}{dataset}/subtask2/test_set.csv') 
 
 
@@ -741,6 +833,7 @@ def test_eval_subtask():
     merge_test_embeddings = gnn_test_embeddings.rename(columns={'label': 'label_gnn', 'embedding': 'embedding_gnn'})
     
     
+    return
     # ******************** final clf model
     device = 'cpu'
     print("device: ", device)
@@ -749,10 +842,10 @@ def test_eval_subtask():
     test_feat_data_pt = merge_test_embeddings[feat_type].values.tolist()
 
     
-    classifiers = ['XGBClassifier_train_', 'LinearSVC_train_', 'SGDClassifier_train_', 'LogisticRegression_train_']
+    classifiers = ['XGBClassifier_train_', 'LinearSVC_train_', 'SGDClassifier_train_', 'LogisticRegression_train_'] # RandomForestClassifier_train_
     for clf in classifiers:
         #print("****************************** ", clf)
-        clf_model_name_ml = f'{clf}{feat_type}' # XGBClassifier_train_ | LogisticRegression_train_ | SGDClassifier_train_ | LinearSVC_train_
+        clf_model_name_ml = f'{clf}{feat_type}' # XGBClassifier_train_ | LogisticRegression_train_ | SGDClassifier_train_ | LinearSVC_train_ | RandomForestClassifier_train_
 
         clf_model = utils.load_data(path=f'{exp_file_path}clf_models/', file_name=f'{clf_model_name_ml}') 
         y_pred = clf_model.predict(test_feat_data_pt)
@@ -788,7 +881,7 @@ if __name__ == '__main__':
     with mlflow.start_run(tags=run_tags) as run:
         #main()
         extract_embeddings_subtask1() 
-        train_clf_model_batch_subtask()
+        #train_clf_model_batch_subtask()
         test_eval_subtask()
 
 
