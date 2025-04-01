@@ -486,6 +486,13 @@ def extract_gnn_embeddings(model, data, data_loader):
     return test_embeddings, test_node_indices
 
 
+'''
+training on the full dataset was not possible in some scenarios due to its large size and high computational cost. 
+For this reason, we added the param config "cut_off_dataset" enabling cut-off of the dataset/partition in the form train_val_set
+Also, for each partition, we ensured metadata balancing within each class: for machine-generated texts, we maintained a balanced distribution across different text generation models (e.g., LLaMA, ChatGPT, etc.), and for human-written texts, we preserved balance across source domains (e.g., papers, articles, essays).
+E.g. let's say we want to train our model with 25 % train, 50 % val, and 100 % test; in this case, we set -> 'cut_off_dataset': '25-50-100'
+This could be helpful for a very large dataset, e.g. the COLING dataset (having 606,189 training docs) or to do rapid testing for some configs or proof of concepts
+'''
 def main():    
     # autext23,     100-100-100
     # semeval24,    10-25-25
