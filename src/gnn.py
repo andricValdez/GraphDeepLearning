@@ -44,7 +44,7 @@ import seaborn as sns
 
 import utils
 import gnn_convs
-import node_feat_init
+import GraphDeepLearning.node_feat_init_test as node_feat_init_test
 from stylometric import StyloCorpus
 import text2graph
 from dataset import BuildDataset
@@ -564,7 +564,7 @@ def graph_neural_network(
 
         if text2graph_type == 'hetero':
             text_data_lst = [{'id': d['context']['id'], 'label': d['context']['target'], 'text': d['doc']} for d in all_text_docs]
-            doc_embs_hetero = node_feat_init.llm_get_embbedings_2(text_data_lst, subset='train', emb_type='llm_cls_2', device=device, output_path='', save_emb=False, llm_finetuned_name=llm_finetuned_name, num_labels=num_classes)
+            doc_embs_hetero = node_feat_init_test.llm_get_embbedings_2(text_data_lst, subset='train', emb_type='llm_cls_2', device=device, output_path='', save_emb=False, llm_finetuned_name=llm_finetuned_name, num_labels=num_classes)
             set_idxs = {'train': len(train_text_docs), 'val': len(val_text_docs), 'test': len(test_text_docs)}
 
             all_build_dataset = BuildDataset(

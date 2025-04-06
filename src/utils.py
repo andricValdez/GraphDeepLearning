@@ -19,7 +19,7 @@ import contractions
 
 from stylometric import StyloCorpus
 import node_feat_init
-
+ 
 import nltk
 from nltk.corpus import stopwords
 nltk.download('stopwords')
@@ -32,7 +32,7 @@ logging.basicConfig(stream=sys.stdout, level=logging.INFO, format="%(asctime)s; 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-ROOT_DIR = os.path.dirname(os.path.dirname(__file__)) + '/GraphDeepLearning'
+ROOT_DIR = os.path.dirname(os.path.dirname(__file__)) #+ '/GraphDeepLearning'
 DATASET_DIR = ROOT_DIR + '/datasets/'
 OUTPUT_DIR_PATH = ROOT_DIR + '/outputs/'
 INPUT_DIR_PATH = ROOT_DIR + '/inputs/'
@@ -53,6 +53,10 @@ def read_csv(file_path):
 def read_json(dir_path):
     logger.debug("*** Using dataset: %s", dir_path)
     return pd.read_json(path_or_buf=dir_path, lines=True)
+
+def save_plain_text(data, file_path):
+   with open(file_path, 'w') as output:
+    output.write(str(data))
 
 def save_csv(dataframe, file_path):
     dataframe.to_csv(file_path, encoding='utf-8', index=False)

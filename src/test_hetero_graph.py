@@ -253,7 +253,6 @@ def evaluate(model, loader, criterion, mask_type, device):
 
     return acc, f1_macro, loss, misclassified_nodes, misclassified_true_labels, misclassified_pred_labels, all_preds, all_labels
 
-
 def get_document_embeddings(text, tokenizer, language_model, device):
     # Tokenize the document and convert to tensor
     inputs = tokenizer(text, return_tensors='pt', truncation=True, padding=True, max_length=512).to(device)

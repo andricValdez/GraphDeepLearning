@@ -1,7 +1,7 @@
 import pprint
 import torch
 import numpy as np
-from sklearn.decomposition import PCA
+from sklearn.decomposition import PCA 
 from torch_geometric.data import Data, DataLoader
 from gensim.models import Word2Vec
 from torch.nn import Linear
@@ -79,6 +79,7 @@ from torch_geometric.nn import global_mean_pool, global_max_pool, global_add_poo
 from torch_geometric.datasets import Planetoid
 from torch_geometric.transforms import NormalizeFeatures
 from torch.nn import Linear, BatchNorm1d, ModuleList, LayerNorm
+from IPython.core.display import display, HTML
 from sklearn.feature_extraction.text import TfidfTransformer
 import torch
 import gc
@@ -94,18 +95,13 @@ import utils
 
 #************************************* CONFIGS
 warnings.filterwarnings("ignore")
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 #************************************* CONFIGS
 logging.basicConfig(stream=sys.stdout, level=logging.INFO, format="%(asctime)s; - %(levelname)s; - %(message)s")
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-global cnt1
-cnt1 = 0
-global cnt2
-cnt2 = 0
-global cnt3
-cnt3 = 0
 
 class EarlyStopper:
     def __init__(self, patience=1, min_delta=0):
@@ -167,8 +163,8 @@ class GNN(nn.Module):
                 return TransformerConv(input_dim, hidden_dim, heads=heads, edge_dim=1)
             else:    
                 return TransformerConv(input_dim, hidden_dim, heads=heads)
-
-    def forward(self, x, edge_index, edge_attr=None, batch=None):
+    
+    def forward(self, x, edge_index, edge_attr=None, batch=None, return_attention=False):
         # Handle undirected graphs by adding reverse edges
         #if not self.directed:
         #    edge_index = torch.cat([edge_index, edge_index.flip(0)], dim=1)  # Add reverse edges
@@ -177,12 +173,15 @@ class GNN(nn.Module):
 
         # Pass through the GNN layers
         #print(edge_index.shape, edge_attr.shape)
+        edge_attentions = []  # Store edge attention scores
         self.embeddings.append(x.detach().cpu().numpy())
 
         if self.edge_attr:
-            x = self.conv1(x, edge_index, edge_attr)
+            x, attn = self.conv1(x, edge_index, edge_attr, return_attention_weights=True)
         else:
-            x = self.conv1(x, edge_index)
+            x, attn = self.conv1(x, edge_index, return_attention_weights=True)
+
+        edge_attentions.append(attn)  # Store first-layer attention
 
         emb = x
         x = F.relu(x)
@@ -190,13 +189,13 @@ class GNN(nn.Module):
         x = self.norm1(x)
         x = F.dropout(x, p=self.dropout, training=self.training)
 
-
         for i in range(self.num_layers):
             if self.edge_attr:
-                x = self.convs[i](x, edge_index, edge_attr)
+                x, attn = self.convs[i](x, edge_index, edge_attr, return_attention_weights=True)
             else:
-                x = self.convs[i](x, edge_index)
+                x, attn = self.convs[i](x, edge_index, return_attention_weights=True)
 
+            edge_attentions.append(attn)  # Store attention for each layer
             emb = x
             x = F.relu(x)
             self.embeddings.append(x.detach().cpu().numpy())
@@ -207,9 +206,11 @@ class GNN(nn.Module):
             x = global_mean_pool(x, batch)
 
         x = self.post_mp(x)
+        if return_attention:
+            return edge_attentions  # Return attention coefficients
+        
         #return emb, None, F.log_softmax(x, dim=1)
         return emb, self.embeddings, F.log_softmax(x, dim=1)
-
 
 def train(model, loader, optimizer, criterion, device):
     model.train()
@@ -466,7 +467,6 @@ def get_class_distribution(data_list):
     
     return Counter(labels)  # Count occurrences of each class label
 
-
 def extract_gnn_embeddings(model, data, data_loader):
     model.eval()  # Set model to evaluation mode
     test_embeddings = [[] for _ in range(model.num_layers + 2)]  # Store embeddings at each step
@@ -486,13 +486,7 @@ def extract_gnn_embeddings(model, data, data_loader):
     return test_embeddings, test_node_indices
 
 
-'''
-training on the full dataset was not possible in some scenarios due to its large size and high computational cost. 
-For this reason, we added the param config "cut_off_dataset" enabling cut-off of the dataset/partition in the form train_val_set
-Also, for each partition, we ensured metadata balancing within each class: for machine-generated texts, we maintained a balanced distribution across different text generation models (e.g., LLaMA, ChatGPT, etc.), and for human-written texts, we preserved balance across source domains (e.g., papers, articles, essays).
-E.g. let's say we want to train our model with 25 % train, 50 % val, and 100 % test; in this case, we set -> 'cut_off_dataset': '25-50-100'
-This could be helpful for a very large dataset, e.g. the COLING dataset (having 606,189 training docs) or to do rapid testing for some configs or proof of concepts
-'''
+
 def main():    
     # autext23,     100-100-100
     # semeval24,    10-25-25
@@ -501,36 +495,36 @@ def main():
     # semeval24_s2
     config = {
         'build_graph': False,
-        'dataset_name': 'autext23', # autext23, semeval24, coling24, autext23_s2, semeval24_s2
+        'dataset_name': 'coling24', # autext23, semeval24, coling24, autext23_s2, semeval24_s2
         'cut_off_dataset': '1-1-1', # train-val-test
         "nfi": 'llm', # llm, w2v, random
-        'cuda_num': 1,
+        'cuda_num': 0,
 
-        'window_size': 10,
+        'window_size': 5,
         'graph_direction': 'undirected', # undirected | directed (for now all are undirecte, pending to handle and review to support both)
         'special_chars': False,
         'stop_words': False,
         'min_df': 5, # 1->autext | 5->semeval | 5-coling
         'max_df': 0.9,
-        'max_features': None, # None -> all | 5000
+        'max_features': 5000, # None -> all | 5000
         'not_found_tokens': 'avg', # avg, remove, zeros, ones
-        'add_edge_attr': False,
+        'add_edge_attr': True,
         'add_graph_metric': False,
         'embed_reduction': False,
 
         "gnn_type": 'TransformerConv', # GCNConv, GATConv, TransformerConv
-        "dropout": 0.6,
+        "dropout": 0.5,
         "patience": 5, # 5-autext23 | 10-semeval | 10-coling
-        "learnin_rate": 0.000002, # autext23 -> llm: 0.00002 | semeval -> llm: 0.000005  | coling -> llm: 0.0001 
+        "learnin_rate": 0.0001, # autext23 -> llm: 0.00002 | semeval -> llm: 0.000005  | coling -> llm: 0.0001 
         "batch_size": 32 * 1,
         "hidden_dim": 100, # 300 autext_s2, 100 others
-        "dense_hidden_dim": 32, # 64-autext23 | 32-semeval | 64-coling
+        "dense_hidden_dim": 64, # 64-autext23 | 32-semeval | 64-coling
         "num_layers": 1,
         "heads": 1,
         "output_dim": 2, # 2-bin | 6-multi 
-        "weight_decay": 0.001, 
+        "weight_decay": 0.0001, 
         "num_neighbors": [50, 40],  # Adjust sampling depth
-        'input_dim': 128,
+        'input_dim': 768,
         'epochs': 100,
         "llm_name": 'microsoft/deberta-v3-base',
 
@@ -555,7 +549,9 @@ def main():
     device = torch.device(f"cuda:{config['cuda_num']}" if torch.cuda.is_available() else "cpu")
     pprint.pprint(config)
     
+
     if config['build_graph']:
+        start_time = time.time()
         # Load and preprocess dataset
         train_text_set, val_text_set, test_text_set = test_utils.read_dataset(config['dataset_name'])
 
@@ -588,6 +584,7 @@ def main():
         X = vectorizer.fit_transform(all_texts_norm)
         vocab = vectorizer.get_feature_names_out()
         word_to_index = {word: idx for idx, word in enumerate(vocab)}
+        index_to_word = {idx: word for idx, word in enumerate(vocab)}
         print('vocab: ', len(vocab))
 
         tfidf_transformer = TfidfTransformer()
@@ -647,7 +644,7 @@ def main():
             doc_features = torch.stack(doc_features)  # Convert list of tensors to a single tensor
 
 
-        # **** Extracting document-word edges
+        # **** Create document-word edges
         doc_word_edges = set()
         doc_word_attr = {}
         for doc_id, doc in enumerate(tqdm(X, desc="Extracting document-word edges")):
@@ -663,7 +660,6 @@ def main():
                 #if reverse_edge not in doc_word_edges:
                 #    doc_word_edges.add(reverse_edge)
                 #    doc_word_attr[reverse_edge] = X_tfidf[doc_id, word_idx]
-
 
         # Convert set to a sorted list (ensuring consistent order)
         doc_word_edges = sorted(doc_word_edges)  # List of (source, target) tuples
@@ -722,9 +718,13 @@ def main():
         directed_edge_index = edges
         undirected_edge_index = torch.cat([edges, edges.flip(0)], dim=1)  # Add reverse edges
         
-        # Removes duplicate edges
-        directed_edge_index = torch.unique(directed_edge_index, dim=1)  
-        undirected_edge_index = torch.unique(undirected_edge_index, dim=1)  
+        # Removes duplicate edges (CHECK)
+        #directed_edge_index = torch.unique(directed_edge_index, dim=1)  
+        #undirected_edge_index = torch.unique(undirected_edge_index, dim=1)  
+
+        #print(len(doc_word_attr), len(word_word_attr), len(edge_attr))
+        #print(len(doc_word_edges), len(word_word_edges), edges.shape)
+        #print(undirected_edge_index.shape, directed_edge_index.shape)
 
         # Handle edge_attr for undirected edges
         #if config['graph_direction'] == 'undirected':
@@ -740,6 +740,8 @@ def main():
         val_mask[len(train_set):len(train_set) + len(val_set)] = True
         test_mask[len(train_set) + len(val_set):len(train_set) + len(val_set) + len(test_set)] = True
 
+        num_docs = len(train_set) + len(val_set) + len(test_set)
+
         # Create the PyG Data object
         data = Data(
             x = node_features,
@@ -751,8 +753,23 @@ def main():
             val_mask = val_mask,
             test_mask = test_mask,
             #graph_metrics = graph_metrics,
-            y = node_labels
+            y = node_labels,
+            num_docs = num_docs,
+            #vocab = vocab,
+            #word_to_index = word_to_index,
+            #index_to_word = index_to_word,
+            #all_texts_norm = all_texts_norm
         )
+
+        # add/remove attr from Data object (based on the above config, this reduce the traning time)
+        if config['graph_direction'] == 'undirected':
+            data.edge_index = data.undirected_edge_index
+            if config['add_edge_attr']:
+                data.edge_attr = torch.cat([data.edge_attr, data.edge_attr], dim=0)  # Duplicate edge_attr for reverse edges
+        else:
+            data.edge_index = data.directed_edge_index
+        del data.directed_edge_index
+        del data.undirected_edge_index
 
         # Apply dimensionality reduction to train, val, and test data
         new_feat_dim = 128
@@ -763,7 +780,7 @@ def main():
         # Save the data object
         #utils.save_data(data, file_name_data, path=output_dir, format_file='.pkl', compress=False)
         utils.save_data(data, file_name_data, path=f'{output_dir}/{nfi_dir}/', format_file='.pkl', compress=False)
-
+        print("--- %s Graph Built Time: ---" % (time.time() - start_time))
     else:
         # Load the data object
         #data = utils.load_data(file_name_data, path=output_dir, format_file='.pkl', compress=False)
@@ -774,16 +791,6 @@ def main():
     #utils.save_data(data, file_name_data, path=output_dir, format_file='.pkl', compress=False)
     #return
 
-    # add/remove attr from Data object (based on the above config, this reduce the traning time)
-    if config['graph_direction'] == 'undirected':
-        data.edge_index = data.undirected_edge_index
-        if config['add_edge_attr']:
-            data.edge_attr = torch.cat([data.edge_attr, data.edge_attr], dim=0)  # Duplicate edge_attr for reverse edges
-    #        data.edge_attr = torch.unique(data.edge_attr, dim=1)  
-    else:
-        data.edge_index = data.directed_edge_index
-    del data.directed_edge_index
-    del data.undirected_edge_index
 
     if config['add_graph_metric']:
         data.x = torch.cat([data.x, data.graph_metrics], dim=-1)
@@ -792,6 +799,8 @@ def main():
 
     if not config['add_edge_attr']:
         del data.edge_attr
+
+    del data.vocab
 
     # Find isolated nodes
     #nodes_with_edges = torch.unique(data.edge_index.flatten())
@@ -802,7 +811,7 @@ def main():
 
     # move data object to devine
     data = data.to(device)
-    print(data)
+    #print(data)
 
     # Create NeighborLoader instances
     train_nodes = torch.nonzero(data.train_mask, as_tuple=True)[0]  # Indices of train nodes
@@ -819,8 +828,8 @@ def main():
         input_nodes=train_nodes, # also is valid to pass directly: data.train_mask
         shuffle=True,
         replace=False,
-        num_workers=4,
-        persistent_workers=True  # Caches samples for repeated training 
+        num_workers=1,
+        persistent_workers=False  # Caches samples for repeated training 
     )
 
     val_loader = NeighborLoader(
@@ -830,8 +839,8 @@ def main():
         input_nodes=val_nodes,
         shuffle=True,
         replace=False,
-        num_workers=4,
-        persistent_workers=True  # Caches samples for repeated training         
+        num_workers=1,
+        persistent_workers=False  # Caches samples for repeated training         
     )
 
     test_loader = NeighborLoader(
@@ -841,8 +850,8 @@ def main():
         input_nodes=test_nodes,
         shuffle=True,
         replace=False,
-        num_workers=4,
-        persistent_workers=True  # Caches samples for repeated training 
+        num_workers=1,
+        persistent_workers=False  # Caches samples for repeated training 
     )
 
     for batch in train_loader:
@@ -879,6 +888,8 @@ def main():
     early_stopper = EarlyStopper(patience=config['patience'], min_delta=0)
 
     logger.info("Init GNN training!")
+    start_time = time.time()
+
     best_test_acc, best_test_f1score, best_epoch = 0, 0, 0
     for epoch in range(config['epochs']):
         #with torch.cuda.amp.autocast():  # Use FP16 for faster computation
@@ -902,7 +913,9 @@ def main():
         if early_stopper.early_stop(val_loss):
             print('Early stopping due to no improvement!')
             break
+    
     logger.info("Done GNN training!")
+    print("--- %s Graph Training Time ---" % (time.time() - start_time))
 
     # Evaluate on test set
     test_acc, test_f1_macro, test_loss, _, _ = evaluate(model, test_loader, criterion, 'test', device)
@@ -911,12 +924,32 @@ def main():
     print(f'Test F1Score: {test_f1_macro:.4f}')
     print(f'Test Loss: {test_loss:.4f}')
 
-    model_save_path = f"{output_dir}/models/gnn_model_{config['nfi']}_{file_name_data}.pt"
-    torch.save(model.state_dict(), model_save_path)
+    model_save_path = f"{output_dir}/models/gnn_model_{nfi_dir}_{file_name_data}.pth"
+    
+    # save model state dict (weights, layers, etc)
+    model_checkpoint = {
+        'model_state_dict': model.state_dict(),
+        'input_dim': config['input_dim'],
+        'hidden_dim': config['hidden_dim'],
+        'dense_hidden_dim': config['dense_hidden_dim'],
+        'output_dim': config['output_dim'],
+        'dropout': config['dropout'],
+        'num_layers': config['num_layers'],
+        'edge_attr': config['add_edge_attr'],
+        'gnn_type': config['gnn_type'],
+        'heads': config['heads'],
+        'task': 'node',
+        'graph_direction': config['graph_direction'],
+    }
+    torch.save(model_checkpoint, model_save_path)
+
+    # save entire model (this save hyperparam, architecture and model params)
+    #torch.save(model, model_save_path)
+    
     print(f"Model saved at: {model_save_path}")
 
-    
-    
+    return
+
     # Extract embeddings for the test set nodes
     test_embeddings, test_node_indices = extract_gnn_embeddings(model, data, test_loader)
 
@@ -939,8 +972,333 @@ def main():
         plt.show()
         plt.savefig(f'test_emb_{i}.png')
 
-     
 
 
+# **************** GNN Explicability
+def create_node_masks(data, num_docs):
+    
+    num_nodes = data.x.shape[0]  # Total number of nodes
+    num_words = num_nodes - num_docs  # Compute the number of word nodes dynamically
+
+    # Create masks
+    doc_mask = torch.zeros(num_nodes, dtype=torch.bool)
+    word_mask = torch.zeros(num_nodes, dtype=torch.bool)
+
+    # Assign document nodes (first num_docs)
+    doc_mask[:num_docs] = True
+
+    # Assign word nodes (remaining nodes after documents)
+    word_mask[num_docs:] = True
+    print(doc_mask, word_mask)
+    return doc_mask, word_mask
+
+
+def print_top_words_by_class(class_word_score_list, num_top_words=10):
+    """
+    Prints the most frequently attended words with average attention score.
+    """
+    print("\n Top Influential Words per Class (with average attention):")
+    for label, name in zip([0, 1], ["Human", "Machine"]):
+        print(f"\n Class: {name} (label={label})")
+
+        # Aggregate count and attention scores
+        word_counter = Counter()
+        word_scores = defaultdict(list)
+        for word, score in class_word_score_list[label]:
+            word_counter[word] += 1
+            word_scores[word].append(score)
+
+        for word, count in word_counter.most_common(num_top_words):
+            avg_score = sum(word_scores[word]) / len(word_scores[word])
+            print(f"   {word:<20} → in {count:3d} docs | avg attention: {avg_score:.4f}")
+
+
+def get_doc_word_attention_undirected(model, data, num_docs, layer=0):
+    """
+    From undirected edge attention, extract attention scores for document-word pairs.
+    """
+    model.eval()
+    with torch.no_grad():
+        attn_layers = model(data.x, data.edge_index, data.edge_attr, return_attention=True)
+
+    attn_data = {
+        'edge_index': attn_layers[layer][0].cpu().numpy(),
+        'attention': attn_layers[layer][1].cpu().numpy().flatten()
+    }
+
+    doc_word_attention = defaultdict(list)
+    sources, targets = attn_data['edge_index']
+    attentions = attn_data['attention']
+
+    for src, tgt, score in zip(sources, targets, attentions):
+        if (src < num_docs and tgt >= num_docs):  # doc -- word
+            doc_id, word_id = src, tgt
+        elif (tgt < num_docs and src >= num_docs):  # word -- doc
+            doc_id, word_id = tgt, src
+        else:
+            continue  # skip word-word or doc-doc edges
+        doc_word_attention[doc_id].append((word_id, score))
+
+    return doc_word_attention
+
+
+def aggregate_top_words_by_class(doc_word_attention, doc_labels, vocab, num_docs, top_k=5):
+    """
+    Collect top-k attended words (with scores) per class label.
+    Returns: class_word_counter[label] = list of (word, attention_score)
+    """
+    word_id_to_token = {idx + num_docs: token for idx, token in enumerate(vocab)}
+    class_word_score_list = {0: [], 1: []}
+
+    for doc_id, word_scores in doc_word_attention.items():
+        label = doc_labels[doc_id]
+        top_words = sorted(word_scores, key=lambda x: x[1], reverse=True)[:top_k]
+        for word_id, score in top_words:
+            token = word_id_to_token.get(word_id, f"<W{word_id}>")
+            class_word_score_list[label].append((token, float(score)))
+
+    return class_word_score_list
+
+
+def analyze_attention_top_words(doc_word_attention, data, top_k=10, num_top_words=10):
+    doc_labels = data.y[:data.num_docs].cpu().numpy()
+    class_word_counter = aggregate_top_words_by_class(doc_word_attention, doc_labels, data.vocab, data.num_docs, top_k)
+    print_top_words_by_class(class_word_counter, num_top_words)
+    return class_word_counter
+
+
+def get_top_k_attended_words_per_class(doc_word_attention, labels, vocab, num_docs, top_k_per_doc=5, top_k_final=10):
+    word_id_to_token = {i + num_docs: token for i, token in enumerate(vocab)}
+    class_top_attended = {0: [], 1: []}  # list of (token, attn_score)
+
+    for doc_id, word_attn in doc_word_attention.items():
+        label = labels[doc_id]
+        top_words = sorted(word_attn, key=lambda x: x[1], reverse=True)[:top_k_per_doc]
+        for word_id, attn_score in top_words:
+            token = word_id_to_token.get(word_id, f"<W{word_id}>")
+            class_top_attended[label].append((token, attn_score))
+
+    # Now select top-k by attention score (not averaging!)
+    final_top_k = {}
+    for label in [0, 1]:
+        seen = set()
+        sorted_by_score = sorted(class_top_attended[label], key=lambda x: x[1], reverse=True)
+        top_unique = []
+        for word, score in sorted_by_score:
+            if word not in seen:
+                top_unique.append((word, score))
+                seen.add(word)
+            if len(top_unique) == top_k_final:
+                break
+        final_top_k[label] = top_unique 
+
+    return final_top_k
+
+
+def sample_docs_by_class(data, labels, class_id=0, n=10):
+    doc_indices = torch.nonzero(data.y[:data.num_docs] == class_id, as_tuple=True)[0]
+    sampled = doc_indices[torch.randperm(len(doc_indices))[:n]]
+    return sampled.cpu().numpy()
+
+
+def extract_doc_word_attention(attn_layer, num_docs, doc_ids):
+    edge_index = attn_layer[0].cpu().numpy()
+    attention = attn_layer[1].cpu().numpy().flatten()
+    
+    doc_word_attn = defaultdict(list)
+    src, tgt = edge_index
+
+    for s, t, a in zip(src, tgt, attention):
+        if s in doc_ids and t >= num_docs:
+            doc_word_attn[s].append((t, a))
+        elif t in doc_ids and s >= num_docs:
+            doc_word_attn[t].append((s, a))
+    return doc_word_attn
+
+
+def plot_word_saliency(doc_id, original_text, word_attention, word_id_offset, vocab, top_k=5, class_label=None):
+    word_scores = [(wid - word_id_offset, attn) for wid, attn in word_attention]
+    word_scores = [(vocab[i], attn) for i, attn in word_scores if 0 <= i < len(vocab)]
+    word_scores = sorted(word_scores, key=lambda x: x[1], reverse=True)[:top_k]
+
+    words, attns = zip(*word_scores) if word_scores else ([], [])
+
+    fig, ax = plt.subplots(figsize=(min(12, 2 + 0.5 * len(words)), 1.5))
+    bars = ax.barh(range(len(words)), attns, color='crimson', alpha=0.8)
+    ax.set_yticks(range(len(words)))
+    ax.set_yticklabels(words)
+    ax.invert_yaxis()
+    ax.set_title(f"Doc #{doc_id} — Class: {class_label}", fontsize=12)
+    ax.set_xlabel("Attention Coefficient")
+    plt.tight_layout()
+    plt.show()
+
+    # Save figure
+    save_path = os.path.join(test_utils.OUTPUT_DIR_PATH, f"doc_{doc_id}_class_{class_label}.png")
+    plt.savefig(save_path)
+    plt.close()
+
+
+def render_html_saliency(doc_id, text, word_attention, word_id_offset, vocab, top_k=5, class_label=None, save_dir="saliency_html"):
+    #os.makedirs(save_dir, exist_ok=True)
+
+    word_scores = [(wid - word_id_offset, attn) for wid, attn in word_attention]
+    word_scores = [(vocab[i], attn) for i, attn in word_scores if 0 <= i < len(vocab)]
+    word_scores = sorted(word_scores, key=lambda x: x[1], reverse=True)[:top_k]
+
+    if not word_scores:
+        return
+
+    word_attn_dict = {word.lower(): attn for word, attn in word_scores}
+    max_attn = max(word_attn_dict.values())
+
+    def colorize(word):
+        attn = word_attn_dict.get(word.lower(), 0)
+        opacity = min(1.0, attn / max_attn) if max_attn > 0 else 0
+        return f"<span style='background-color: rgba(255, 0, 0, {opacity:.2f}); padding:1px'>{word}</span>"
+
+    tokens = re.findall(r'\w+|\W+', text)
+    highlighted = ''.join([colorize(w) if w.lower() in word_attn_dict else w for w in tokens])
+
+    html = f"""
+    <h3>📄 Document #{doc_id} — Class: {class_label}</h3>
+    <p><strong>Top-{top_k} attended words:</strong></p>
+    <ul>
+        {''.join(f"<li>{w}: {s:.4f}</li>" for w, s in word_scores)}
+    </ul>
+    <p style="font-family:monospace; line-height:1.5;">{highlighted}</p>
+    <hr/>
+    """
+
+    file_path = os.path.join(test_utils.OUTPUT_DIR_PATH, f"doc_{doc_id}_class_{class_label}.html")
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(html)
+
+    print(f"📄 Saved: {file_path}")
+
+
+
+def gnn_explicability():
+    dataset_name = 'semeval24' # autext23, semeval24, coling24, autext23_s2, semeval24_s2
+    cut_off_dataset = '5-5-5' # train-val-test
+    llm_name = 'microsoft/deberta-v3-base'
+    file_name_data = f"hetero_data_{dataset_name}_{cut_off_dataset}perc" # perc_128
+    output_dir = f'{test_utils.EXTERNAL_DISK_PATH}hetero_graph'
+    nfi_dir = llm_name.split("/")[1] # nfi -> llm
+
+    # Load the entire model
+    model_save_path = f"{output_dir}/models/gnn_model_{nfi_dir}_{file_name_data}.pth"
+    checkpoint = torch.load(model_save_path, map_location=torch.device('cpu'))
+    model = GNN(
+        checkpoint['input_dim'],
+        checkpoint['hidden_dim'],
+        checkpoint['dense_hidden_dim'],
+        checkpoint['output_dim'],
+        checkpoint['dropout'],
+        checkpoint['num_layers'],
+        edge_attr=checkpoint['edge_attr'],
+        gnn_type=checkpoint['gnn_type'],
+        heads=checkpoint['heads'],
+        task=checkpoint['task'],
+        directed=(checkpoint['graph_direction'] == 'directed')
+    )
+
+    # Load the model's state dict
+    model.load_state_dict(checkpoint['model_state_dict'])
+    print(model)
+
+    # load Data object
+    data = utils.load_data(file_name_data, path=f'{output_dir}/{nfi_dir}/', format_file='.pkl', compress=False)
+    data.doc_mask, data.word_mask = create_node_masks(data, data['num_docs'])
+    #print(data)
+
+    doc_word_attention = get_doc_word_attention_undirected(model, data, num_docs=data.num_docs, layer=1)
+    utils.save_plain_text(doc_word_attention, test_utils.OUTPUT_DIR_PATH + 'data.txt')
+
+    # After training and having `model`, `data`, `vocab`
+    '''
+    top_words = analyze_attention_top_words(
+        doc_word_attention=doc_word_attention,
+        data=data,
+        top_k=10,
+        num_top_words=10,
+    )
+    '''
+    # get top k attended words
+    '''
+    final_top_k = get_top_k_attended_words_per_class(
+        doc_word_attention, 
+        data.y[:data.num_docs].cpu().numpy(), 
+        data.vocab, 
+        data.num_docs, 
+        top_k_per_doc=10, 
+        top_k_final=10
+    )
+    print("\n Top-K Highest Attention Words per Class:")
+    for label, name in zip([0, 1], ["Human", "Machine"]):
+        print(f"\n🔹 Class: {name} (label={label})")
+        for word, score in final_top_k[label]:
+            print(f"   {word:<20} → attention score: {score:.4f}")
+    '''
+
+    # plot top_k words per class (png image)
+    '''
+    doc_ids = sample_docs_by_class(data, data.y, class_id=0, n=10)
+    for doc_id in doc_ids:
+        text = data.all_texts_norm[doc_id]
+        word_attn = doc_word_attention.get(doc_id, [])
+        plot_word_saliency(doc_id, text, word_attn, word_id_offset=data.num_docs, vocab=data.vocab, top_k=10, class_label=0)
+    doc_ids = sample_docs_by_class(data, data.y, class_id=1, n=10)
+    for doc_id in doc_ids:
+        text = data.all_texts_norm[doc_id]
+        word_attn = doc_word_attention.get(doc_id, [])
+        plot_word_saliency(doc_id, text, word_attn, word_id_offset=data.num_docs, vocab=data.vocab, top_k=10, class_label=1)
+    '''
+
+    #generate html
+    '''
+    doc_ids = sample_docs_by_class(data, data.y, class_id=0, n=10)    
+    for doc_id in doc_ids:
+        text = data.all_texts_norm[doc_id]
+        word_attn = doc_word_attention.get(doc_id, [])
+        render_html_saliency(doc_id, text, word_attn, word_id_offset=data.num_docs, vocab=data.vocab, top_k=10, class_label=0, save_dir='')
+    '''
+
+    # get top-k word-score per document
+    cnt = 0
+    doc_labels = data.y[:data.num_docs].cpu().numpy()
+    word_id_to_token = {idx + data.num_docs: token for idx, token in enumerate(data.vocab)}
+    for doc_id, word_scores in doc_word_attention.items():
+        print(f"\nDocument {doc_id} ({doc_labels[doc_id]}):")
+        top_words = sorted(word_scores, key=lambda x: x[1], reverse=True)[:5]
+        for word_id, attn in top_words:            
+            word = word_id_to_token.get(word_id, f"<W{word_id}>")
+            print(f"  {word} ({attn:.4f})")
+        
+        if cnt == 10:
+            break
+        cnt += 1
+
+
+    topk_per_doc = []
+    top_k = 10
+    for doc_id, word_scores in doc_word_attention.items():
+        #print(f"\nDocument {doc_id} ({doc_labels[doc_id]}):")
+        sorted_top = sorted(word_scores, key=lambda x: x[1], reverse=True)[:top_k]
+        entry = {
+            "doc_id": int(doc_id),
+            "label": int(data.y[doc_id].item()),
+            "top_words": [
+                {"word": str(word_id_to_token.get(w)), "attention": float(a)}
+                for w, a in sorted_top
+            ]
+        }
+        topk_per_doc.append(entry)
+        
+    utils.save_json(topk_per_doc, test_utils.OUTPUT_DIR_PATH + dataset_name + '_data.json')
+
+
+    
 if __name__ == '__main__':
     main()
+    #gnn_explicability()

@@ -28,7 +28,7 @@ from transformers import logging as transform_loggin
 from transformers import AutoTokenizer, AutoModel, Trainer, AutoModelForSequenceClassification, TrainingArguments
 
 import utils
-import node_feat_init
+import GraphDeepLearning.node_feat_init_test as node_feat_init_test
 from stylometric import StyloCorpus
 import text2graph
 
@@ -45,7 +45,7 @@ os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
 
 class BuildDataset():
     def __init__(self, graphs_data, text_docs, subset, device,  edge_features=False, 
-                 nfi='llm', llm_finetuned_name=node_feat_init.LLM_HF_FINETUNED_NAME, 
+                 nfi='llm', llm_finetuned_name=node_feat_init_test.LLM_HF_FINETUNED_NAME, 
                  exp_file_path=utils.OUTPUT_DIR_PATH, num_labels=2, dataset_partition=None, 
                  num_features=None, text2graph_type='cooc', avg_llm_found_tokens=True,
                  avg_llm_not_found_tokens=True, doc_embs_hetero=[], set_idxs={}
@@ -73,10 +73,10 @@ class BuildDataset():
         if self.text2graph_type == 'cooc':
             if self.subset == 'train':
                 if self.nfi == 'w2v':
-                    self.nfi_model = node_feat_init.w2v_train(graph_data=self.graphs_data, num_features=self.num_features)
+                    self.nfi_model = node_feat_init_test.w2v_train(graph_data=self.graphs_data, num_features=self.num_features)
                     utils.save_data(self.nfi_model, path=f'{utils.OUTPUT_DIR_PATH}w2v_models/', file_name=f'model_w2v_{self.dataset_partition}')
                 if self.nfi == 'fasttext':
-                    self.nfi_model = node_feat_init.fasttext_train(graph_data=self.graphs_data, num_features=self.num_features)
+                    self.nfi_model = node_feat_init_test.fasttext_train(graph_data=self.graphs_data, num_features=self.num_features)
                     utils.save_data(self.nfi_model, path=f'{utils.OUTPUT_DIR_PATH}fasttext_models/', file_name=f'model_fasttext_{self.dataset_partition}')
             else:
                 if self.nfi == 'w2v':
@@ -111,12 +111,12 @@ class BuildDataset():
                     # ************************************************** NEW implementation (20/01/2025)
                     self.nfi_model = {}
                     for idx, g in enumerate(graphs_data_batch): 
-                        embeddings_word_dict = node_feat_init.llm_get_embbedings_3([{'doc': self.text_docs[text_docs_cnt]['doc']}], self.device, model, tokenizer, self.avg_llm_found_tokens, self.text2graph_type)
+                        embeddings_word_dict = node_feat_init_test.llm_get_embbedings_3([{'doc': self.text_docs[text_docs_cnt]['doc']}], self.device, model, tokenizer, self.avg_llm_found_tokens, self.text2graph_type)
                         #print('\n')
                         #print("doc_id: ", self.text_docs[text_docs_cnt]['id'])
                         #print(len(list(g['graph'].nodes)), list(g['graph'].nodes))
                         #print(len(embeddings_word_dict.keys()), embeddings_word_dict.keys())
-                        self.nfi_model[str(graphs_data_batch[idx]['doc_id'])] = node_feat_init.get_emb_word_nodes(embeddings_word_dict, g, tokenizer, self.avg_llm_not_found_tokens, self.text2graph_type)
+                        self.nfi_model[str(graphs_data_batch[idx]['doc_id'])] = node_feat_init_test.get_emb_word_nodes(embeddings_word_dict, g, tokenizer, self.avg_llm_not_found_tokens, self.text2graph_type)
                         text_docs_cnt += 1
                 
                 for index_in_batch, g in enumerate(graphs_data_batch):
@@ -168,11 +168,11 @@ class BuildDataset():
                 model = model.to(self.device)
 
                 if self.nfi == 'llm':
-                    embeddings_word_dict = node_feat_init.llm_get_embbedings_3(self.text_docs, self.device, model, tokenizer, self.avg_llm_found_tokens, self.text2graph_type)
-                    self.nfi_model = node_feat_init.get_emb_word_nodes(embeddings_word_dict, graph_data, tokenizer, self.avg_llm_not_found_tokens, self.text2graph_type)
+                    embeddings_word_dict = node_feat_init_test.llm_get_embbedings_3(self.text_docs, self.device, model, tokenizer, self.avg_llm_found_tokens, self.text2graph_type)
+                    self.nfi_model = node_feat_init_test.get_emb_word_nodes(embeddings_word_dict, graph_data, tokenizer, self.avg_llm_not_found_tokens, self.text2graph_type)
                     print("nfi_model.keys: ", len(self.nfi_model.keys()))
             else:
-                self.nfi_model = node_feat_init.w2v_train(graph_data=graph_data, num_features=self.num_features)
+                self.nfi_model = node_feat_init_test.w2v_train(graph_data=graph_data, num_features=self.num_features)
 
             try:
                 # Get node features
