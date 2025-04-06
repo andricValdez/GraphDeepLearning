@@ -360,7 +360,7 @@ def get_word_embeddings2(texts_set, texts_tokenized, tokenizer, language_model, 
                     for token, subtokens in not_found_tokens_dict.items():
                         if token in doc_words_embeddings_dict[idx]['tokens']:
                             continue
-                        for subtoken in subtokens:
+                        for subtoken in subtokens: 
                             if subtoken in doc_words_embeddings_dict[idx]['tokens']:
                                 emb_list.append(doc_words_embeddings_dict[idx]['tokens'][subtoken])
                     if len(emb_list) == 0:

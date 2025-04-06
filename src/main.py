@@ -50,7 +50,7 @@ import utils
 import baselines
 import gnn
 import text2graph
-import node_feat_init
+import GraphDeepLearning.node_feat_init_test as node_feat_init_test
 
 #************************************* CONFIGS
 logging.basicConfig(stream=sys.stdout, level=logging.INFO, format="%(asctime)s; - %(levelname)s; - %(message)s")
@@ -471,9 +471,9 @@ def extract_embeddings_subtask1():
     vector_size = 150
     w2v_model = Word2Vec(sentences=train_text_norm_tokenized, vector_size=vector_size, window=5, min_count=1, workers=4)
 
-    X_train = np.array([node_feat_init.get_document_embedding_w2v(doc, w2v_model) for doc in tqdm(train_text_norm_tokenized, desc="Processing train docs")])
-    X_val = np.array([node_feat_init.get_document_embedding_w2v(doc, w2v_model) for doc in tqdm(val_text_norm_tokenized, desc="Processing val docs")])
-    X_test = np.array([node_feat_init.get_document_embedding_w2v(doc, w2v_model) for doc in tqdm(test_text_norm_tokenized, desc="Processing test docs")])
+    X_train = np.array([node_feat_init_test.get_document_embedding_w2v(doc, w2v_model) for doc in tqdm(train_text_norm_tokenized, desc="Processing train docs")])
+    X_val = np.array([node_feat_init_test.get_document_embedding_w2v(doc, w2v_model) for doc in tqdm(val_text_norm_tokenized, desc="Processing val docs")])
+    X_test = np.array([node_feat_init_test.get_document_embedding_w2v(doc, w2v_model) for doc in tqdm(test_text_norm_tokenized, desc="Processing test docs")])
 
     #*** TRAIN classifier
     #clf = LogisticRegression()

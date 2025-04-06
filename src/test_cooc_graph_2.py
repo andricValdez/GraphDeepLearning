@@ -645,9 +645,9 @@ def get_influential_words(model, data_loader, device, vocab, top_k=20):
 
 def main():    
     config = {
-        'build_graph': False,
-        'dataset_name': 'semeval24', # autext23, semeval24, coling24, autext23_s2, semeval24_s2
-        'cut_off_dataset': '5-10-10', # train-val-test
+        'build_graph': True,
+        'dataset_name': 'autext23', # autext23, semeval24, coling24, autext23_s2, semeval24_s2
+        'cut_off_dataset': '1-1-1', # train-val-test
         "nfi": 'llm', # llm, w2v, random
         'cuda_num': 1,
 
@@ -701,7 +701,7 @@ def main():
         # ****************************** PROCESS AUTEXT DATASET && CUTOF
         # Load and preprocess dataset
         train_text_set, val_text_set, test_text_set = test_utils.read_dataset(config['dataset_name'])
-
+    
         # Cut off datasets
         cut_off_train = int(config['cut_off_dataset'].split('-')[0])
         cut_off_val = int(config['cut_off_dataset'].split('-')[1])
@@ -834,50 +834,6 @@ def main():
         vocab = data_obj['vocab']
         word_to_index = data_obj['word_to_index']
 
-    # ********** cutoff saved data - TMP
-    '''
-    cutoff = 50
-    print("len_train_val_test: ", len(train_data), len(val_data), len(test_data))
-    print("train_len: ", Counter([data.y for data in train_data]))
-    print("val_len: ", Counter([data.y for data in val_data]))
-    print("test_len: ", Counter([data.y for data in test_data]))
-    train_data = train_data[:int(len(train_data) * (cutoff / 100))]
-    val_data = val_data[:int(len(val_data) * (cutoff / 100))]
-    test_data = test_data[:int(len(test_data) * (cutoff / 100))]
-    print("len_train_val_test: ", len(train_data), len(val_data), len(test_data))
-    print("train_len: ", Counter([data.y for data in train_data]))
-    print("val_len: ", Counter([data.y for data in val_data]))
-    print("test_len: ", Counter([data.y for data in test_data]))
-    '''
-    # ********** cutoff saved data - TMP
-
-    # ********** Add metadata - TMP
-    '''train_text_set, val_text_set, test_text_set = test_utils.read_dataset(config['dataset_name'])
-    # Cut off datasets
-    cut_off_train = int(config['cut_off_dataset'].split('-')[0])
-    cut_off_val = int(config['cut_off_dataset'].split('-')[1])
-    cut_off_test = int(config['cut_off_dataset'].split('-')[2])
-
-    train_set = train_text_set[:int(len(train_text_set) * (cut_off_train / 100))][:]
-    val_set = val_text_set[:int(len(val_text_set) * (cut_off_val / 100))][:]
-    test_set = test_text_set[:int(len(test_text_set) * (cut_off_test / 100))][:]
-    
-    for idx, data in enumerate(train_data):
-        if config['dataset_name'] == 'autext23':
-            data.metadata = {"label": train_set.iloc[idx]["label"],"domain": train_set.iloc[idx]["domain"],"model": train_set.iloc[idx]["model"]}
-    for idx, data in enumerate(val_data):
-        if config['dataset_name'] == 'autext23':
-            data.metadata = {"label": val_set.iloc[idx]["label"],"domain": val_set.iloc[idx]["domain"],"model": val_set.iloc[idx]["model"]}
-    for idx, data in enumerate(test_data):
-        if config['dataset_name'] == 'autext23':
-            data.metadata = {"label": test_set.iloc[idx]["label"],"domain": test_set.iloc[idx]["domain"],"model": test_set.iloc[idx]["model"]}
-    
-    print(train_data[0])
-    data_obj['all_data'] = [train_data, val_data, test_data]
-    utils.save_data(data_obj, file_name_data, path=f'{output_dir}/{nfi_dir}/', format_file='.pkl', compress=False)
-    return'''
-    # ********** Add metadata - TMP
-
     # Add reverse edges edge attributes and graph_metrics
     for data in train_data + val_data + test_data:
         if config['add_graph_metric']:
@@ -980,15 +936,9 @@ def main():
 
 
 
-
-
-
-
-
-
 def plot_confusion_matrix(y_true, y_pred, class_names, dataset_name, normalize=False, cmap="Blues"):
     cm = confusion_matrix(y_true, y_pred)
-    
+
     if normalize:
         cm = cm.astype("float") / cm.sum(axis=1, keepdims=True)
 
@@ -1041,8 +991,7 @@ def evaluate_with_metadata(model, dataloader, device):
     # Compute accuracy and F1-score
     accuracy = accuracy_score(df_results["label"], df_results["predicted_label"])
     f1 = f1_score(df_results["label"], df_results["predicted_label"], average="macro")
-    cm = confusion_matrix(df_results["predicted_label"], df_results["label"])
-
+    cm = confusion_matrix(df_results["label"], df_results["predicted_label"])
     return df_results, accuracy, f1, cm
 
 def load_model_for_inference(model_class, model_path, config, device):
@@ -1080,7 +1029,7 @@ def load_model_for_inference(model_class, model_path, config, device):
 def model_inference():
     cuda_num = 1
     nfi = 'llm' # llm, w2v, random
-    cut_off_dataset = '10-10-10' # semeval: 5-10-10 | autext: 10-10-10 | coling: 1-1-1
+    cut_off_dataset = '10-10-10' # autext: 10-10-10 | semeval: 5-10-10 | coling: 1-1-1
     dataset_name = 'autext23'  # autext23, semeval24, coling24, autext23_s2, semeval24_s2
     file_name_data = f"cooc_data_{dataset_name}_{cut_off_dataset}perc"
     device = torch.device(f"cuda:{cuda_num}" if torch.cuda.is_available() else "cpu")
@@ -1104,7 +1053,7 @@ def model_inference():
         "hidden_dim": 100,
         "dense_hidden_dim": 64,
         "output_dim": 2,
-        "dropout": 0.8,
+        "dropout": 0.5,
         "num_layers": 1,
         "add_edge_attr": True,
         "gnn_type": 'TransformerConv',
@@ -1122,14 +1071,20 @@ def model_inference():
 
     print(f"Test Accuracy: {test_acc:.4f}")
     print(f"Test F1 Score: {test_f1_macro:.4f}")
-    print(cm)
-
+    
+    print("\n cm: ", cm)
     class_names = ["Human", "Machine"]
     plot_confusion_matrix(df_results["label"], df_results["predicted_label"], class_names, dataset_name, normalize=True)
     
     # Analyze error distribution by domain
-    df_errors = df_results[df_results["label"] != df_results["predicted_label"]]
+    print(df_results.info())
+    print("Pred label distribution per domain in test set:\n", df_results.groupby("domain")["predicted_label"].value_counts())
+    print("Pred label distribution per model in test set:\n", df_results.groupby("model")["predicted_label"].value_counts())
 
+    print("Truth label distribution per domain in test set:\n", df_results.groupby("domain")["label"].value_counts())
+    print("Truth label distribution per model in test set:\n", df_results.groupby("model")["label"].value_counts())
+   
+    df_errors = df_results[df_results["label"] != df_results["predicted_label"]]
     print(df_errors["label"].value_counts(normalize=False))
     domain_error_dist = df_errors["domain"].value_counts(normalize=False)
     model_error_dist = df_errors["model"].value_counts(normalize=True)
@@ -1140,6 +1095,8 @@ def model_inference():
     
     print("\nError Distribution by AI Model:")
     print(model_error_dist)
+
+    return
 
     # Compute influential words
     influential_words = get_influential_words(model, test_loader, device, vocab, top_k=10)
