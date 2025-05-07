@@ -94,6 +94,7 @@ def read_dataset(dataset_name):
         autext_train_set = autext_train_set.sample(frac=1).reset_index(drop=True)
         autext_val_set = autext_val_set.sample(frac=1).reset_index(drop=True)
         autext_test_set = autext_test_set.sample(frac=1).reset_index(drop=True)
+        autext_test_set['source'] = 'unknown'
         print("autext_train_set: ", autext_train_set.info())
 
         autext_train_set['word_len'] = autext_train_set['text'].str.split().str.len()
@@ -136,23 +137,31 @@ def read_dataset(dataset_name):
         autext_train_set = utils.read_csv(file_path=f'{utils.DATASET_DIR}autext2023/{subtask}/train_set.csv') 
         autext_val_set = utils.read_csv(file_path=f'{utils.DATASET_DIR}autext2023/{subtask}/val_set.csv') 
         autext_test_set = utils.read_csv(file_path=f'{utils.DATASET_DIR}autext2023/{subtask}/test_set.csv') 
+        autext_train_set = autext_train_set.sample(frac=1).reset_index(drop=True)
+        autext_val_set = autext_val_set.sample(frac=1).reset_index(drop=True)
+        autext_test_set = autext_test_set.sample(frac=1).reset_index(drop=True)
+        
+        autext_train_set.rename(columns={'domain': 'source'}, inplace=True)
+        autext_val_set.rename(columns={'domain': 'source'}, inplace=True)
+        autext_test_set.rename(columns={'domain': 'source'}, inplace=True)
+
         print("autext_train_set: ", autext_train_set.info())
         print("autext_val_set: ", autext_val_set.info())
         print("autext_test_set: ", autext_test_set.info())
         print("total_distro_train_val_test: ", autext_train_set.shape, autext_val_set.shape, autext_test_set.shape)
         print("label_distro_train_val_test: ", autext_train_set.value_counts('label'), autext_val_set.value_counts('label'), autext_test_set.value_counts('label'))
-        print("domain_distro_train_val_test: ", autext_train_set.value_counts('domain'), autext_val_set.value_counts('domain'), autext_test_set.value_counts('domain'))
+        print("source_distro_train_val_test: ", autext_train_set.value_counts('source'), autext_val_set.value_counts('source'), autext_test_set.value_counts('source'))
         print("model_distro_train_val_test: ", autext_train_set.value_counts('model'), autext_val_set.value_counts('model'), autext_test_set.value_counts('model'))
         
         # Model distribution for each source
-        print("Model distribution per source in Train set:\n", autext_train_set.groupby("domain")["model"].value_counts())
-        print("Model distribution per source in Validation set:\n", autext_val_set.groupby("domain")["model"].value_counts())
-        print("Model distribution per source in Test set:\n", autext_test_set.groupby("domain")["model"].value_counts())
+        print("Model distribution per source in Train set:\n", autext_train_set.groupby("source")["model"].value_counts())
+        print("Model distribution per source in Validation set:\n", autext_val_set.groupby("source")["model"].value_counts())
+        print("Model distribution per source in Test set:\n", autext_test_set.groupby("source")["model"].value_counts())
 
         # Label distribution for each source
-        print("Label distribution per source in Train set:\n", autext_train_set.groupby("domain")["label"].value_counts())
-        print("Label distribution per source in Validation set:\n", autext_val_set.groupby("domain")["label"].value_counts())
-        print("Label distribution per source in Test set:\n", autext_test_set.groupby("domain")["label"].value_counts())
+        print("Label distribution per source in Train set:\n", autext_train_set.groupby("source")["label"].value_counts())
+        print("Label distribution per source in Validation set:\n", autext_val_set.groupby("source")["label"].value_counts())
+        print("Label distribution per source in Test set:\n", autext_test_set.groupby("source")["label"].value_counts())
 
 
         autext_train_set['word_len'] = autext_train_set['text'].str.split().str.len()

@@ -6,7 +6,7 @@ from torch_geometric.data import Data, DataLoader
 from torch.nn import Linear
 from torch_geometric.nn import GCNConv, global_mean_pool
 import torch.nn.functional as F
-from sklearn.decomposition import PCA
+from sklearn.decomposition import PCA 
 from gensim.models import Word2Vec
 from itertools import combinations
 import re
@@ -91,6 +91,7 @@ from torch_geometric.datasets import Planetoid
 from torch_geometric.transforms import NormalizeFeatures
 from torch.nn import Linear, BatchNorm1d, ModuleList, LayerNorm
 import torch
+import spacy
 torch.cuda.is_available()
 
 from nltk.corpus import stopwords
@@ -108,7 +109,8 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 warnings.filterwarnings("ignore")
 
-
+# --- Load spaCy tokenizer ---
+nlp = spacy.load("en_core_web_sm", disable=["ner", "parser"])
 
 class EarlyStopper:
     def __init__(self, patience=1, min_delta=0):
@@ -136,24 +138,26 @@ class GNN(nn.Module):
         self.gnn_type = gnn_type
         self.edge_attr = edge_attr
         self.conv1 = self.build_conv_model(input_dim, hidden_dim, self.heads)
-        self.norm1 = nn.LayerNorm(hidden_dim * heads) # LayerNorm, BatchNorm1d
+        self.norm1 = nn.BatchNorm1d(hidden_dim * heads) # LayerNorm, BatchNorm1d
         self.convs = nn.ModuleList()
         #self.convs.append(self.build_conv_model(input_dim, hidden_dim, self.heads))
         self.lns = nn.ModuleList()
         for l in range(num_layers):
             self.convs.append(self.build_conv_model(hidden_dim * heads, hidden_dim, self.heads))
-            self.lns.append(nn.LayerNorm(hidden_dim * heads))
+            self.lns.append(nn.BatchNorm1d(hidden_dim * heads))
 
         # Post-message-passing
         self.post_mp = nn.Sequential(
-            nn.Linear(hidden_dim * heads, dense_hidden_dim),
+            #nn.Linear(hidden_dim * heads, dense_hidden_dim),
             #nn.Dropout(dropout),
             #nn.LayerNorm(dense_hidden_dim),
-            nn.Linear(dense_hidden_dim, int(dense_hidden_dim // 2)),
+            #nn.Linear(dense_hidden_dim, int(dense_hidden_dim // 2)),
             #nn.Dropout(dropout),
             #nn.LayerNorm(int(dense_hidden_dim // 2)),
-            nn.Linear(int(dense_hidden_dim // 2), output_dim),
-            #nn.Linear(int(dense_hidden_dim // 4), output_dim)
+            #nn.Linear(int(dense_hidden_dim // 2), output_dim),
+            
+            nn.Linear(hidden_dim*heads, dense_hidden_dim),
+            nn.Linear(dense_hidden_dim, output_dim)
         )
 
         self.dropout = dropout
@@ -197,7 +201,8 @@ class GNN(nn.Module):
         logits = self.post_mp(x)
         probs  = F.log_softmax(logits, dim=1)
         # self.sigmoid(x)
-        return emb, logits, probs
+        #return emb, logits, probs
+        return emb, logits, logits
 
 def train_cooc(model, loader, device, optimizer, criterion):
         model.train()
@@ -350,7 +355,7 @@ def get_word_embeddings(word, tokenizer, language_model, device):
     word_embedding = outputs.last_hidden_state.mean(dim=1).squeeze().cpu().numpy()
     return word_embedding
 
-def get_word_embeddings2(texts_set, texts_tokenized, tokenizer, language_model, vocab, device, reduction_layer, set_corpus='train', not_found_tokens='avg'):
+def get_word_embeddings2(texts_set, texts_tokenized, tokenizer, language_model, vocab, device, reduction_layer, set_corpus='train', not_found_tokens='avg', reduce_dim_to=128):
     doc_words_embeddings_dict = {}
 
     for idx, text in enumerate(tqdm(texts_set, desc=f"Extracting {set_corpus} word embeddings")):
@@ -412,9 +417,9 @@ def get_word_embeddings2(texts_set, texts_tokenized, tokenizer, language_model, 
                 not_found_tokens_dict = {}
 
                 if not_found_tokens == 'ones':
-                    doc_words_embeddings_dict[idx]['tokens'][token] = torch.ones(128, dtype=torch.float)
+                    doc_words_embeddings_dict[idx]['tokens'][token] = torch.ones(reduce_dim_to, dtype=torch.float)
                 elif not_found_tokens == 'zeros':
-                    doc_words_embeddings_dict[idx]['tokens'][token] = torch.zeros(128, dtype=torch.float)
+                    doc_words_embeddings_dict[idx]['tokens'][token] = torch.zeros(reduce_dim_to, dtype=torch.float)
                 else:  # avg
                     node_tokens = tokenizer.encode_plus(token, return_tensors="pt", padding=True, truncation=True)
                     raw_tokens = [tokenizer.decode([token_id]) for token_id in node_tokens['input_ids'][0]]
@@ -429,7 +434,7 @@ def get_word_embeddings2(texts_set, texts_tokenized, tokenizer, language_model, 
                                 emb_list.append(doc_words_embeddings_dict[idx]['tokens'][subtoken].detach().cpu())  # FIX: Detach tensor
                     
                     if len(emb_list) == 0:
-                        avg_emb = torch.zeros(128, dtype=torch.float)
+                        avg_emb = torch.zeros(reduce_dim_to, dtype=torch.float)
                     else:
                         avg_emb = torch.mean(torch.stack(emb_list), axis=0)
                     
@@ -463,10 +468,15 @@ def get_word_embeddings3(corpus, tokenizer, language_model, vocab, device, not_f
                     else:
                         embeddings_word_dict[token] = np.add.reduce([embeddings_word_dict[token], current_emb])
 
-    for token, freq in token_freq.items():
-        if freq > 1:
-            embeddings_word_dict[token] = np.divide(embeddings_word_dict[token], freq).tolist()
+    #for token, freq in token_freq.items():
+    #    if freq > 1:
+    #        embeddings_word_dict[token] = np.divide(embeddings_word_dict[token], freq).tolist()
 
+    # Normalize embeddings based on frequency
+    for token, freq in token_freq.items():
+        embeddings_word_dict[token] = torch.tensor(np.divide(embeddings_word_dict[token], freq).tolist(), dtype=torch.float)
+
+    print("embeddings_word_dict: ", len(embeddings_word_dict))
     #print("len_embeddings_word_dict", len(embeddings_word_dict.keys()), embeddings_word_dict.keys())
     # Step 3: Create a list of embeddings in the order of the vocabulary
     cnt_found = 0
@@ -475,13 +485,15 @@ def get_word_embeddings3(corpus, tokenizer, language_model, vocab, device, not_f
     not_found_tokens_dict = {}
     for word in tqdm(vocab, desc="Extracting word embeddings2"):
         if word in embeddings_word_dict:
-            cnt_found+=1
-            # Average embeddings for repeated words
-            word_embeddings.append(embeddings_word_dict[word])
+            continue
         else:
             cnt_not_found+=1
             # Handle words not in the embeddings (e.g., assign a random vector)
-            if not_found_tokens == 'avg':
+            if not_found_tokens == 'ones':
+                embeddings_word_dict[word] = torch.ones(language_model.config.hidden_size, dtype=torch.float)
+            if not_found_tokens == 'zeros':
+                embeddings_word_dict[word] = torch.zeros(language_model.config.hidden_size, dtype=torch.float)
+            else: # not_found_tokens == 'avg':
                 node_tokens = tokenizer.encode_plus(word, return_tensors="pt", padding=True, truncation=True)
                 raw_tokens = [tokenizer.decode([token_id]) for token_id in node_tokens['input_ids'][0]]
                 not_found_tokens_dict[word] = raw_tokens[1:-1]
@@ -492,43 +504,65 @@ def get_word_embeddings3(corpus, tokenizer, language_model, vocab, device, not_f
                     for subtoken in subtokens:
                         if subtoken in embeddings_word_dict:
                             emb_list.append(embeddings_word_dict[subtoken])
+                
                 if len(emb_list) == 0:
-                    avg_emb = np.ones(language_model.config.hidden_size)
+                    avg_emb = torch.zeros(language_model.config.hidden_size, dtype=torch.float)
                 else:
-                    avg_emb = np.mean(emb_list, axis=0).flatten().tolist()
-                word_embeddings.append(avg_emb)
+                    avg_emb = torch.mean(torch.stack(emb_list), axis=0)
                 embeddings_word_dict[token] = avg_emb
-            if not_found_tokens == 'ones':
-                word_embeddings.append(np.ones(language_model.config.hidden_size))
-            if not_found_tokens == 'zeros':
-                word_embeddings.append(np.zeros(language_model.config.hidden_size))
-            else:
-                ... # remove¿?
 
     print("emb_words cnt_found: ", cnt_found)
     print("emb_words cnt_not_found: ", cnt_not_found)
     print("not_found_tokens_dict: ", len(not_found_tokens_dict))
-    return word_embeddings
+    return embeddings_word_dict
 
-def normalize_text(texts, tokenize_pattern, special_chars=False, stop_words=False, set='train'):
-    texts_norm = []
-    tokenized_corpus = []
-    for text in tqdm(texts, desc=f"normalizing {set} corpus"):
+def normalize_text(texts, tokenize_pattern, special_chars=False, stop_words=False, set='train'):    
+    all_texts_norm = []
+    for text in tqdm(texts, desc=f"Normalizing {set} corpus"):
         text_norm = test_utils.text_normalize(text, special_chars, stop_words) 
-        texts_norm.append(text_norm)
-        text_doc_tokens = re.findall(tokenize_pattern, text_norm)
-        tokenized_corpus.append(text_doc_tokens)
-    return texts_norm, tokenized_corpus
+        all_texts_norm.append(text_norm)
+        #tokenized_corpus.append(re.findall(tokenize_pattern, text_norm))
+    
+    tokenized_corpus = []
+    docs_nlp_spacy = nlp_pipeline(texts)
+    for doc in docs_nlp_spacy:
+        tokens = []
+        for token in doc:
+            if stop_words and token.is_stop:
+                continue
+            if special_chars and token.is_punct:
+                continue
+            tokens.append(token.text) # text, lemma_, pos_
+        tokenized_corpus.append(tokens)
+    return all_texts_norm, tokenized_corpus, docs_nlp_spacy
 
-def create_vocab(texts, set='all', min_df=1, max_df=0.9, max_features=5000):
-    # Create a vocabulary
-    #vectorizer = CountVectorizer()
+
+def create_vocab_v1(texts, stop_words=False, special_chars=False, min_df=1, max_df=1.0, max_features=5000):
     vectorizer = CountVectorizer(min_df=min_df, max_df=max_df, max_features=max_features)
-    vectorizer.fit_transform(texts)
+    X = vectorizer.fit_transform(texts)
     vocab = vectorizer.get_feature_names_out()
-    # Create a word-to-index dictionary for fast lookups
     word_to_index = {word: idx for idx, word in enumerate(vocab)}
-    print(f'vocab {set} set: ', len(vocab))
+    return vocab, word_to_index
+
+
+def create_vocab_v2(docs_nlp, stop_words=False, special_chars=False, min_df=1, max_features=5000):
+    vocab = set()
+    word_freq = Counter()
+    for doc in docs_nlp:
+        tokens = []
+        for token in doc:
+            if stop_words and token.is_stop:
+                continue
+            if special_chars and token.is_punct:
+                continue
+            vocab.add(token.text)
+            word_freq[token.text] += 1
+            tokens.append(token.text) # text, lemma_, pos_
+    vocab = list(vocab)
+    filtered_vocab = [word for word in vocab if word_freq[word] >= min_df]
+    filtered_vocab = sorted(filtered_vocab, key=lambda w: word_freq[w], reverse=True)[:max_features]
+    vocab = filtered_vocab
+    word_to_index = {w: i for i, w in enumerate(vocab)}
     return vocab, word_to_index
 
 def calculate_pmi(co_occurrence_matrix, word_freq, total_pairs):
@@ -641,40 +675,46 @@ def get_influential_words(model, data_loader, device, vocab, top_k=20):
 
     return influential_words
 
+def nlp_pipeline(docs: list):
+    doc_lst = []
+    for nlp_doc in tqdm(nlp.pipe(docs, batch_size=64, n_process=4), total=len(docs), desc="nlp_spacy_docs"):
+        doc_lst.append(nlp_doc)
+    return doc_lst
 
 
 def main():    
     config = {
-        'build_graph': True,
+        'build_graph': False,
         'dataset_name': 'autext23', # autext23, semeval24, coling24, autext23_s2, semeval24_s2
-        'cut_off_dataset': '1-1-1', # train-val-test
+        'cut_off_dataset': '100-100-100', # train-val-test
         "nfi": 'llm', # llm, w2v, random
         'cuda_num': 1,
 
         'window_size': 10,
         'graph_direction': 'undirected', # undirected | directed 
-        'special_chars': False,
-        'stop_words': False,
+        'special_chars': False, # punctuation
+        'stop_words':    False,
         'min_df': 2, # 1->autext | 5->semeval | 5-coling
         'max_df': 0.9,
-        'max_features': None, # None -> all | 5000, 10000
+        'max_features': 15000, # None -> all | 5000, 10000, 50000
         'not_found_tokens': 'avg', # avg, remove, zeros, ones
         'add_edge_attr': True,
         'add_graph_metric': False,
-        'embed_reduction': True, # speacially for llm to reduce emb_size from 768 -> 128 
+        'embed_reduction': False, # speacially for llm to reduce emb_size from 768 -> 256 
 
         "gnn_type": 'TransformerConv', # GCNConv, GINConv, GATConv, TransformerConv
         "dropout": 0.5,
         "patience": 10, # 5-autext23 | 10-semeval | 10-coling
-        "learnin_rate": 0.000005, # autext23_s2 -> llm: 0.0002 | autext23 -> llm: 0.00001 | semeval -> llm: 0.000005  | coling -> llm: 0.0001 
-        "batch_size": 32 * 1,
+        "learnin_rate": 0.00002, # autext23_s2 -> llm: 0.0002 | autext23 -> llm: 0.00001 | semeval -> llm: 0.000005  | coling -> llm: 0.0001 
+        "batch_size": 256 * 1,
         "hidden_dim": 100, # 300 autext_s2, 100 others
-        "dense_hidden_dim": 32, # 64-autext23 | 32-semeval | 64-coling
+        "dense_hidden_dim": 64, # 64-autext23 | 32-semeval | 64-coling
         "num_layers": 1,
         "heads": 1,
         "output_dim": 2, # 2-bin | 6-multi 
-        "weight_decay": 0.0001, 
-        'input_dim': 128, 
+        "weight_decay": 5e-4, 
+        'input_dim': 256, # 768, 128
+        'reduce_dim_to': 256, # 128, 256
         'epochs': 100,
         "llm_name": 'microsoft/deberta-v3-base',
     }
@@ -726,14 +766,20 @@ def main():
 
         # Normalize and Tokenize the corpus 
         tokenize_pattern = "[A-Z]{2,}(?![a-z])|[A-Z][a-z]+(?=[A-Z])|[\'\w\-]+"
-        train_texts_norm, train_texts_tokenized = normalize_text(train_texts, tokenize_pattern, special_chars=config['special_chars'], stop_words=config['stop_words'], set='train')
-        val_texts_norm, val_texts_tokenized = normalize_text(val_texts, tokenize_pattern, special_chars=config['special_chars'], stop_words=config['stop_words'], set='val')
-        test_texts_norm, test_texts_tokenized = normalize_text(test_texts, tokenize_pattern, special_chars=config['special_chars'], stop_words=config['stop_words'], set='test')
+        train_texts_norm, train_texts_tokenized, docs_nlp = normalize_text(train_texts, tokenize_pattern, special_chars=config['special_chars'], stop_words=config['stop_words'], set='train')
+        val_texts_norm, val_texts_tokenized, docs_nlp = normalize_text(val_texts, tokenize_pattern, special_chars=config['special_chars'], stop_words=config['stop_words'], set='val')
+        test_texts_norm, test_texts_tokenized, docs_nlp = normalize_text(test_texts, tokenize_pattern, special_chars=config['special_chars'], stop_words=config['stop_words'], set='test')
+        
+        #print("all_vocab: ", len(set(sum(test_texts_tokenized + val_texts_tokenized + test_texts_tokenized, []))))
 
         # create a vocabulary
         all_texts_norm = train_texts_norm + val_texts_norm + test_texts_norm
-        vocab, word_to_index = create_vocab(all_texts_norm, min_df=config['min_df'], max_df=config['max_df'], max_features=config['max_features'])
+        #vocab, word_to_index = create_vocab_v1(all_texts_norm, stop_words=config['stop_words'], special_chars=config['special_chars'], min_df=config['min_df'], max_features=config['max_features'])
+        vocab, word_to_index = create_vocab_v2(docs_nlp, stop_words=config['stop_words'], special_chars=config['special_chars'], min_df=config['min_df'], max_features=config['max_features'])
+        
         print("not_found_tokens approach: ", config['not_found_tokens'])
+        print(f'vocab len: ', len(vocab))
+
         # LLM        
         # Extract embedding from language model
         tokenizer = AutoTokenizer.from_pretrained(config['llm_name'], model_max_length=512)
@@ -741,11 +787,17 @@ def main():
 
         # *** Generate embeddings method 2  - LLM 
         if config['nfi'] == 'llm':
-            embedding_reduction = nn.Linear(768, 128).to(device)
-            train_words_emb = get_word_embeddings2(train_texts_norm, train_texts_tokenized, tokenizer, language_model, vocab, device, embedding_reduction, set_corpus='train', not_found_tokens=config['not_found_tokens'])
-            val_words_emb = get_word_embeddings2(val_texts_norm, val_texts_tokenized, tokenizer, language_model, vocab, device, embedding_reduction, set_corpus='val', not_found_tokens=config['not_found_tokens'])
-            test_words_emb = get_word_embeddings2(test_texts_norm, test_texts_tokenized, tokenizer, language_model, vocab, device, embedding_reduction, set_corpus='test', not_found_tokens=config['not_found_tokens'])
+            embedding_reduction = nn.Linear(768, config['reduce_dim_to']).to(device)
+            # FEAT DOC LEVEL
+            train_words_emb = get_word_embeddings2(train_texts_norm, train_texts_tokenized, tokenizer, language_model, vocab, device, embedding_reduction, set_corpus='train', not_found_tokens=config['not_found_tokens'], reduce_dim_to=config['reduce_dim_to'])
+            val_words_emb = get_word_embeddings2(val_texts_norm, val_texts_tokenized, tokenizer, language_model, vocab, device, embedding_reduction, set_corpus='val', not_found_tokens=config['not_found_tokens'], reduce_dim_to=config['reduce_dim_to'])
+            test_words_emb = get_word_embeddings2(test_texts_norm, test_texts_tokenized, tokenizer, language_model, vocab, device, embedding_reduction, set_corpus='test', not_found_tokens=config['not_found_tokens'], reduce_dim_to=config['reduce_dim_to'])
             
+            # FEAT CORPUS LEVEL
+            #train_words_emb = get_word_embeddings3(train_texts_norm, tokenizer, language_model, vocab, device, not_found_tokens='avg')
+            #val_words_emb = get_word_embeddings3(val_texts_norm, tokenizer, language_model, vocab, device, not_found_tokens='avg')
+            #test_words_emb = get_word_embeddings3(test_texts_norm, tokenizer, language_model, vocab, device, not_found_tokens='avg')
+
         # Train WORD2VEC model on the corpus (or load a pre-trained model)
         if config['nfi'] == 'w2v':
             w2v_model = Word2Vec(sentences=train_texts_tokenized + val_texts_tokenized + test_texts_tokenized, vector_size=config['input_dim'], window=5, min_count=1, workers=4)
@@ -761,36 +813,50 @@ def main():
             train_words_emb = {idx: {'tokens': {word: word_features[word] for word in text if word in word_features}} for idx, text in enumerate(train_texts_tokenized)}
             val_words_emb = {idx: {'tokens': {word: word_features[word] for word in text if word in word_features}} for idx, text in enumerate(val_texts_tokenized)}
             test_words_emb = {idx: {'tokens': {word: word_features[word] for word in text if word in word_features}} for idx, text in enumerate(test_texts_tokenized)}
-            
+         
 
-        # extract doc edges
+        # extract doc edges (save tokens for each doc) - FEAT DOC LEVEL
         train_data, val_data, test_data = [], [], []
         for idx, (text_tokenized, label) in enumerate(zip(tqdm(train_texts_tokenized, desc="Extracting doc train edges"), train_labels)):
             doc_edges = extract_doc_edges(text_tokenized, label, train_words_emb[idx]['tokens'], vocab, config['window_size'])
             if doc_edges:
                 if config['dataset_name'] == 'autext23':
-                    doc_edges.metadata = {"label": train_set.iloc[idx]["label"],"domain": train_set.iloc[idx]["domain"],"model": train_set.iloc[idx]["model"]}
+                    doc_edges.metadata = {"label": train_set.iloc[idx]["label"],"source": train_set.iloc[idx]["source"],"model": train_set.iloc[idx]["model"]}
                 if config['dataset_name'] in ['semeval24', 'coling24']: 
-                    doc_edges.metadata = {"label": train_set.iloc[idx]["label"],"domain": train_set.iloc[idx]["source"],"model": train_set.iloc[idx]["model"]}
+                    doc_edges.metadata = {"label": train_set.iloc[idx]["label"],"source": train_set.iloc[idx]["source"],"model": train_set.iloc[idx]["model"]}
                 train_data.append(doc_edges)
         for idx, (text_tokenized, label) in enumerate(zip(tqdm(val_texts_tokenized, desc="Extracting doc val edges"), val_labels)):
             doc_edges = extract_doc_edges(text_tokenized, label, val_words_emb[idx]['tokens'], vocab, config['window_size'])
             if doc_edges:
                 if config['dataset_name'] == 'autext23':
-                    doc_edges.metadata = {"label": val_set.iloc[idx]["label"],"domain": val_set.iloc[idx]["domain"],"model": val_set.iloc[idx]["model"]}
+                    doc_edges.metadata = {"label": val_set.iloc[idx]["label"],"source": val_set.iloc[idx]["source"],"model": val_set.iloc[idx]["model"]}
                 if config['dataset_name'] in ['semeval24', 'coling24']: 
-                    doc_edges.metadata = {"label": val_set.iloc[idx]["label"],"domain": val_set.iloc[idx]["source"],"model": val_set.iloc[idx]["model"]}
+                    doc_edges.metadata = {"label": val_set.iloc[idx]["label"],"source": val_set.iloc[idx]["source"],"model": val_set.iloc[idx]["model"]}
                 val_data.append(doc_edges)
         for idx, (text_tokenized, label) in enumerate(zip(tqdm(test_texts_tokenized, desc="Extracting doc test edges"), test_labels)):
             doc_edges = extract_doc_edges(text_tokenized, label, test_words_emb[idx]['tokens'], vocab, config['window_size'])
             if doc_edges:
                 if config['dataset_name'] == 'autext23':
-                    doc_edges.metadata = {"label": test_set.iloc[idx]["label"],"domain": test_set.iloc[idx]["domain"],"model": test_set.iloc[idx]["model"]}
+                    doc_edges.metadata = {"label": test_set.iloc[idx]["label"],"source": test_set.iloc[idx]["source"],"model": test_set.iloc[idx]["model"]}
                 if config['dataset_name'] in ['coling24']: # semeval24 dont have this info in test_Set
-                    doc_edges.metadata = {"label": test_set.iloc[idx]["label"],"domain": test_set.iloc[idx]["source"],"model": test_set.iloc[idx]["model"]}
+                    doc_edges.metadata = {"label": test_set.iloc[idx]["label"],"source": test_set.iloc[idx]["source"],"model": test_set.iloc[idx]["model"]}
                 if config['dataset_name'] in ['semeval24']: # semeval24 dont have this info in test_Set
                     doc_edges.metadata = {"label": test_set.iloc[idx]["label"]}
                 test_data.append(doc_edges)
+        
+
+        # extract doc edges (save tokens for all corpus) - FEAT COPURS LEVEL
+        '''train_data, val_data, test_data = [], [], []
+        for idx, (text_tokenized, label) in enumerate(zip(tqdm(train_texts_tokenized, desc="Extracting doc train edges"), train_labels)):
+            doc_edges = extract_doc_edges(text_tokenized, label, train_words_emb, vocab, config['window_size'])
+            train_data.append(doc_edges)
+        for idx, (text_tokenized, label) in enumerate(zip(tqdm(val_texts_tokenized, desc="Extracting doc train edges"), val_labels)):
+            doc_edges = extract_doc_edges(text_tokenized, label, val_words_emb, vocab, config['window_size'])
+            val_data.append(doc_edges)
+        for idx, (text_tokenized, label) in enumerate(zip(tqdm(test_texts_tokenized, desc="Extracting doc train edges"), test_labels)):
+            doc_edges = extract_doc_edges(text_tokenized, label, test_words_emb, vocab, config['window_size'])
+            test_data.append(doc_edges)'''
+            
 
         if config['add_graph_metric']:
             for data in tqdm(train_data + val_data + test_data, desc="Extracting graph metric data"):
@@ -804,7 +870,6 @@ def main():
                     data.graph_metrics = torch.zeros((num_nodes, num_metrics), dtype=torch.float)
                     logger.warning(f"Using default metrics for graph: {data}")
 
-
         # Apply dimensionality reduction to train, val, and test data
         #new_feat_dim = 128
         #if config['embed_reduction']:    
@@ -812,7 +877,6 @@ def main():
         #    train_data = reduce_dimension_linear(train_data, embedding_reduction, device)
         #    val_data = reduce_dimension_linear(val_data, embedding_reduction, device)
         #    test_data = reduce_dimension_linear(test_data, embedding_reduction, device)
-
 
         # *** Save data
         all_data = [train_data, val_data, test_data]
@@ -833,6 +897,11 @@ def main():
         test_data = data_obj['all_data'][2]
         vocab = data_obj['vocab']
         word_to_index = data_obj['word_to_index']
+        
+    print("vocab: ", len(vocab))
+    print("train_data: ", len(train_data))
+    print("val_data: ", len(val_data))
+    print("test_data: ", len(test_data))
 
     # Add reverse edges edge attributes and graph_metrics
     for data in train_data + val_data + test_data:
@@ -925,6 +994,8 @@ def main():
     torch.save(model.state_dict(), model_save_path)
     print(f"Model saved at: {model_save_path}")
 
+    return
+
     # Compute influential words
     influential_words = get_influential_words(model, test_loader, device, vocab, top_k=10)
     # Print influential words per class
@@ -976,14 +1047,14 @@ def evaluate_with_metadata(model, dataloader, device):
             
             # Collect metadata (ensure these fields exist in the batch)
             #all_ids.extend(batch.metadata['id'])
-            all_domains.extend(batch.metadata['domain'])
+            all_domains.extend(batch.metadata['source'])
             all_models.extend(batch.metadata['model'])
     
     # Create a DataFrame for error analysis
     df_results = pd.DataFrame({
         #"id": all_ids,
         "label": all_labels,
-        "domain": all_domains,
+        "source": all_domains,
         "model": all_models,
         "predicted_label": all_preds
     })
@@ -1078,15 +1149,15 @@ def model_inference():
     
     # Analyze error distribution by domain
     print(df_results.info())
-    print("Pred label distribution per domain in test set:\n", df_results.groupby("domain")["predicted_label"].value_counts())
+    print("Pred label distribution per domain in test set:\n", df_results.groupby("source")["predicted_label"].value_counts())
     print("Pred label distribution per model in test set:\n", df_results.groupby("model")["predicted_label"].value_counts())
 
-    print("Truth label distribution per domain in test set:\n", df_results.groupby("domain")["label"].value_counts())
+    print("Truth label distribution per domain in test set:\n", df_results.groupby("source")["label"].value_counts())
     print("Truth label distribution per model in test set:\n", df_results.groupby("model")["label"].value_counts())
    
     df_errors = df_results[df_results["label"] != df_results["predicted_label"]]
     print(df_errors["label"].value_counts(normalize=False))
-    domain_error_dist = df_errors["domain"].value_counts(normalize=False)
+    domain_error_dist = df_errors["source"].value_counts(normalize=False)
     model_error_dist = df_errors["model"].value_counts(normalize=True)
     print(df_errors.head())
     
@@ -1115,8 +1186,8 @@ def model_inference():
 
 
 if __name__ == '__main__':
-    #main()
-    model_inference()
+    main()
+    #model_inference()
 
 
 # ***** AUTEXT CONFIG

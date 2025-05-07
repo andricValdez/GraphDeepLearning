@@ -1,0 +1,15 @@
+artifact_uri: file:///home/avaldez/projects/GraphDeepLearning/src/mlruns/0/e19022d0ea3b459fbe528b16bb1af847/artifacts
+end_time: 1744329329294
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: e19022d0ea3b459fbe528b16bb1af847
+run_name: capable-auk-759
+run_uuid: e19022d0ea3b459fbe528b16bb1af847
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1744329329285
+status: 3
+tags: []
+user_id: avaldez

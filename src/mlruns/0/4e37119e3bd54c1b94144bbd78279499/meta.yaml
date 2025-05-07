@@ -1,0 +1,15 @@
+artifact_uri: file:///home/avaldez/projects/GraphDeepLearning/src/mlruns/0/4e37119e3bd54c1b94144bbd78279499/artifacts
+end_time: 1744330650090
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 4e37119e3bd54c1b94144bbd78279499
+run_name: tmp_trainer
+run_uuid: 4e37119e3bd54c1b94144bbd78279499
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1744330650063
+status: 3
+tags: []
+user_id: avaldez
