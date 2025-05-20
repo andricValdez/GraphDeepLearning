@@ -50,7 +50,8 @@ import utils
 import baselines
 import gnn
 import text2graph
-import GraphDeepLearning.node_feat_init_test as node_feat_init_test
+#import GraphDeepLearning.node_feat_init_test as node_feat_init_test
+import node_feat_init
 
 #************************************* CONFIGS
 logging.basicConfig(stream=sys.stdout, level=logging.INFO, format="%(asctime)s; - %(levelname)s; - %(message)s")
@@ -71,10 +72,10 @@ run = client.create_run(experiment_id)
 
 # currrent_llm: FacebookAI/roberta-base
 cuda_num = 0
-cut_off_dataset = 10 # 25
-cut_off_test_dataset = 5
+cut_off_dataset = 100 # 25
+cut_off_test_dataset = 100
 text2graph_type = 'cooc' # cooc, hetero
-dataset_name = 'semeval24' # semeval24, autext23, coling24, autext23_s2
+dataset_name = 'autext24' # semeval24, autext23, autext24, coling24, autext23_s2
 graph_trans_gnn = None # True, False, None
 build_dataset_gnn = False # True, False
 
@@ -288,26 +289,48 @@ def extract_embeddings_subtask1():
         autext_test_set.to_csv(f'{utils.DATASET_DIR}autext2023/{subtask}/test_set.csv')
         return
         '''
-    
+
     # ****************************** READ DATASET AUTEXT 2024
-    '''
-    dataset_name = 'autext24'
-    # ********** TRAIN
-    autext_train_set = utils.read_json(dir_path=utils.DATASET_DIR + 'subtask_1/train_set.jsonl') 
-    autext_train_set['label'] = np.where(autext_train_set['label'] == 'human', 1, 0)
-    print(autext_train_set.info())
-    print(autext_train_set['label'].value_counts())
+    if dataset_name in ['autext24', 'autext24_s2']:
+        
+        #dataset_name = 'autext23' # autext23, autext23_s2
+        if dataset_name == 'autext24': # subtask1, subtask2
+            subtask = 'subtask1' 
+        if dataset_name == 'autext24_s2':
+            subtask = 'subtask2' #
+        
+        autext_train_set = utils.read_csv(file_path=f'{utils.DATASET_DIR}autext2024/{subtask}/train_set.csv') 
+        autext_val_set = utils.read_csv(file_path=f'{utils.DATASET_DIR}autext2024/{subtask}/val_set.csv') 
+        autext_test_set = utils.read_csv(file_path=f'{utils.DATASET_DIR}autext2024/{subtask}/test_set.csv') 
 
-    # ********** VAL
-    autext_val_set = utils.read_json(dir_path=utils.DATASET_DIR + 'subtask_1/val_set.jsonl') 
-    autext_val_set['label'] = np.where(autext_val_set['label'] == 'human', 1, 0)
-    print(autext_val_set.info())
-    print(autext_val_set['label'].value_counts())
+        autext_train_set = autext_train_set[autext_train_set['language'] == 'en'].reset_index(drop=True)
+        autext_val_set = autext_val_set[autext_val_set['language'] == 'en'].reset_index(drop=True)
+        autext_test_set = autext_test_set[autext_test_set['language'] == 'en']
+        
+        autext_train_set = autext_train_set.sample(frac=1).reset_index(drop=True)
+        autext_val_set = autext_val_set.sample(frac=1).reset_index(drop=True)
+        #autext_test_set = autext_test_set.sample(frac=1).reset_index(drop=True)
+        
+        autext_train_set.rename(columns={'domain': 'source'}, inplace=True)
+        autext_val_set.rename(columns={'domain': 'source'}, inplace=True)
+        autext_test_set.rename(columns={'domain': 'source'}, inplace=True)
 
-    # ********** TEST
-    autext_test_set = utils.read_json(dir_path=utils.DATASET_DIR + 'subtask_1/test_set_original.jsonl') 
+        print("autext_train_set: ", autext_train_set.info())
+        print("autext_val_set: ", autext_val_set.info())
+        print("autext_test_set: ", autext_test_set.info())
+        print("total_distro_train_val_test: ", autext_train_set.shape, autext_val_set.shape, autext_test_set.shape)
+
+        leave_out_sources = ["news", "literary"] 
+        train_keep = autext_train_set[~autext_train_set['source'].isin(leave_out_sources)]
+        train_swap = autext_train_set[autext_train_set['source'].isin(leave_out_sources)]
+        val_keep = autext_val_set[autext_val_set['source'].isin(leave_out_sources)]
+        val_swap = autext_val_set[~autext_val_set['source'].isin(leave_out_sources)]
+
+        #autext_train_set = train_keep
+        autext_train_set = pd.concat([train_keep, val_swap], ignore_index=True)
+        #autext_val_set = val_keep
+        autext_val_set = pd.concat([val_keep, train_swap], ignore_index=True)
     
-    '''
 
     # ****************************** PROCESS AUTEXT DATASET && CUTOF
     # *** TRAIN
@@ -322,31 +345,8 @@ def extract_embeddings_subtask1():
 
     print("cutoff_distro_train_val_test: ", len(autext_train_set), len(autext_val_set), len(autext_test_set))
     print("label_distro_train_val_test: ", autext_train_set.value_counts('label'), autext_val_set.value_counts('label'), autext_test_set.value_counts('label'))
-        
-    '''
-    # ****************************** FINE TUNE LLM
-    for llm in ['microsoft/deberta-v3-base']:
-        node_feat_init.llm_fine_tuning(
-            model_name = 'coling24',  # autext23, autext24, semeval24, coling24
-            train_set_df = autext_train_set, 
-            val_set_df = autext_val_set, # autext_val_set, autext_test_set
-            device = device,
-            llm_to_finetune = llm,
-            num_labels = 2,
-            mode = 'finetune' # finetune, inference
-        )
-    return
-    # microsoft/deberta-v3-base 
-    # google-bert/bert-base-uncased
-    # FacebookAI/roberta-base
-    # andricValdez/bert-base-uncased-finetuned-autext23
-    # andricValdez/roberta-base-finetuned-autext23
-    # andricValdez/bert-base-uncased-finetuned-autext23_sub2
-    # andricValdez/roberta-base-finetuned-autext23_sub2
-    # andricValdez/bert-base-uncased-finetuned-semeval24
-    # andricValdez/roberta-base-finetuned-semeval24 
-    # andricValdez/roberta-base-finetuned-coling24
-    '''
+    
+    
     # cooc
     train_text_docs = utils.process_dataset(autext_train_set)
     val_text_docs = utils.process_dataset(autext_val_set)
@@ -374,8 +374,31 @@ def extract_embeddings_subtask1():
     #return
     
 
+    # ****************************** FINE TUNE LLM
+    '''for llm in ['microsoft/deberta-v3-base']:
+        node_feat_init.llm_fine_tuning(
+            model_name = 'coling24',  # autext23, autext24, semeval24, coling24
+            train_set_df = autext_train_set, 
+            val_set_df = autext_val_set, # autext_val_set, autext_test_set
+            device = device,
+            llm_to_finetune = llm,
+            num_labels = 2,
+            mode = 'finetune' # finetune, inference
+        )
+    return'''
+    # microsoft/deberta-v3-base 
+    # google-bert/bert-base-uncased
+    # FacebookAI/roberta-base
+    # andricValdez/bert-base-uncased-finetuned-autext23
+    # andricValdez/roberta-base-finetuned-autext23
+    # andricValdez/bert-base-uncased-finetuned-autext23_sub2
+    # andricValdez/roberta-base-finetuned-autext23_sub2
+    # andricValdez/bert-base-uncased-finetuned-semeval24
+    # andricValdez/roberta-base-finetuned-semeval24 
+    # andricValdez/roberta-base-finetuned-coling24
+
     # ****************************** BASELINES
-    '''
+    
     print(40*'*', 'Train and Test ML baseline models')
     models = ['LinearSVC','MultinomialNB','LogisticRegression']
     #models = ['xgboost']
@@ -391,7 +414,7 @@ def extract_embeddings_subtask1():
         )
         print('\n')
     return
-    '''
+    
     # ****************************** GRAPH NEURAL NETWORK - RUN EXPERIMENTS IN BATCHES
     '''
     num_classes = 2
@@ -418,6 +441,7 @@ def extract_embeddings_subtask1():
     return
     '''
     # ****************************** GRAPH NEURAL NETWORK - ONE RUNNING
+    '''
     if text2graph_type == 'cooc':
         t2g_instance = text2graph.Text2CoocGraph(
             graph_type = graph_params['graph_type'], 
@@ -438,10 +462,10 @@ def extract_embeddings_subtask1():
             min_word_freq = graph_params['min_word_freq'], 
             node_type = graph_params['node_type']
         )
-
+    '''
 
     # ****************************** BASELINES W2v
-    
+    '''
     #*** GET ground truth
     y_train = np.asarray(autext_train_set['label'].to_list()[:], dtype=np.float32).reshape(-1, 1)
     y_val = np.asarray(autext_val_set['label'].to_list()[:], dtype=np.float32).reshape(-1, 1)
@@ -468,12 +492,12 @@ def extract_embeddings_subtask1():
         text_nrom = test_utils.text_normalize(d['doc'])
         test_text_norm_tokenized.append(re.findall(tokenize_pattern, text_nrom))
     
-    vector_size = 150
+    vector_size = 300
     w2v_model = Word2Vec(sentences=train_text_norm_tokenized, vector_size=vector_size, window=5, min_count=1, workers=4)
 
-    X_train = np.array([node_feat_init_test.get_document_embedding_w2v(doc, w2v_model) for doc in tqdm(train_text_norm_tokenized, desc="Processing train docs")])
-    X_val = np.array([node_feat_init_test.get_document_embedding_w2v(doc, w2v_model) for doc in tqdm(val_text_norm_tokenized, desc="Processing val docs")])
-    X_test = np.array([node_feat_init_test.get_document_embedding_w2v(doc, w2v_model) for doc in tqdm(test_text_norm_tokenized, desc="Processing test docs")])
+    X_train = np.array([node_feat_init.get_document_embedding_w2v(doc, w2v_model) for doc in tqdm(train_text_norm_tokenized, desc="Processing train docs")])
+    X_val = np.array([node_feat_init.get_document_embedding_w2v(doc, w2v_model) for doc in tqdm(val_text_norm_tokenized, desc="Processing val docs")])
+    X_test = np.array([node_feat_init.get_document_embedding_w2v(doc, w2v_model) for doc in tqdm(test_text_norm_tokenized, desc="Processing test docs")])
 
     #*** TRAIN classifier
     #clf = LogisticRegression()
@@ -495,7 +519,7 @@ def extract_embeddings_subtask1():
         round(precision_score(y_test, y_test_pred), 3), round(recall_score(y_test, y_test_pred), 3), round(accuracy_score(y_test, y_test_pred), 3), round(f1_score(y_test, y_test_pred, average='macro'), 3)))
 
     return
-    
+    '''
     
     exp_file_name = "test"
     dataset_partition = f'{dataset_name}_{cut_off_dataset}perc' # perc | perc_go_cls | perc_go_e5
@@ -782,7 +806,7 @@ def test_eval_subtask():
         graph_type = graph_params['graph_type'], window_size = graph_params['window_size'], apply_prep = graph_params['apply_prep'], 
         steps_preprocessing = graph_params['steps_preprocessing'], language = graph_params['language'],
     )
-    '''
+    
     #gnn.graph_neural_network_test_eval(test_text_docs, t2g_instance, nfi, exp_file_path, dataset_partition, llm_model_name, device) 
     #return
 
@@ -874,7 +898,7 @@ def test_eval_subtask():
 
 
     return
-
+    '''
  
 
 if __name__ == '__main__':
@@ -882,7 +906,7 @@ if __name__ == '__main__':
         #main()
         extract_embeddings_subtask1() 
         #train_clf_model_batch_subtask()
-        test_eval_subtask()
+        #test_eval_subtask()
 
 
 # ********* CMDs

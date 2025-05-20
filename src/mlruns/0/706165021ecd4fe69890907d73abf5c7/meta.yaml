@@ -1,0 +1,15 @@
+artifact_uri: mlflow-artifacts:/0/706165021ecd4fe69890907d73abf5c7/artifacts
+end_time: 1747334152373
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 706165021ecd4fe69890907d73abf5c7
+run_name: /home/avaldez/projects/GraphDeepLearning/outputs/finetuned_hf_models/roberta-base-finetuned-autext24
+run_uuid: 706165021ecd4fe69890907d73abf5c7
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1747332955035
+status: 3
+tags: []
+user_id: avaldez

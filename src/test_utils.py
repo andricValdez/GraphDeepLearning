@@ -10,6 +10,7 @@ import contractions
 from torch_geometric.utils import degree
 import numpy as np
 import networkx as nx
+import json 
 
 from nltk.corpus import stopwords
 nltk.download('stopwords')
@@ -79,7 +80,7 @@ def set_random_seed(random_seed):
     random.seed(random_seed)
     os.environ['PYTHONHASHSEED'] = str(random_seed)
 
-def read_dataset(dataset_name):
+def read_dataset(dataset_name, print_info=True):
     if dataset_name in ['semeval24', 'semeval24_s2']:
         
         #dataset_name = 'autext23' # autext23, autext23_s2
@@ -91,36 +92,41 @@ def read_dataset(dataset_name):
         autext_train_set = utils.read_json(dir_path=f'{utils.DATASET_DIR}semeval2024/{subtask}/train_set.jsonl')
         autext_val_set = utils.read_json(dir_path=f'{utils.DATASET_DIR}semeval2024/{subtask}/dev_set.jsonl')
         autext_test_set = utils.read_json(dir_path=f'{utils.DATASET_DIR}semeval2024/{subtask}/test_set.jsonl')
+        
         autext_train_set = autext_train_set.sample(frac=1).reset_index(drop=True)
         autext_val_set = autext_val_set.sample(frac=1).reset_index(drop=True)
-        autext_test_set = autext_test_set.sample(frac=1).reset_index(drop=True)
+        #autext_test_set = autext_test_set.sample(frac=1).reset_index(drop=True)
+        
         autext_test_set['source'] = 'unknown'
-        print("autext_train_set: ", autext_train_set.info())
-
+        autext_test_set['model'] = 'unknown'
         autext_train_set['word_len'] = autext_train_set['text'].str.split().str.len()
         autext_val_set['word_len'] = autext_val_set['text'].str.split().str.len()
         autext_test_set['word_len'] = autext_test_set['text'].str.split().str.len()
-        print("\n min_max_avg_token Train: ", autext_train_set['word_len'].min(), autext_train_set['word_len'].max(), int(autext_train_set['word_len'].mean()))
-        print("min_max_avg_token Val:   ", autext_val_set['word_len'].min(), autext_val_set['word_len'].max(),  int(autext_val_set['word_len'].mean()))
-        print("min_max_avg_token Test:  ", autext_test_set['word_len'].min(), autext_test_set['word_len'].max(), int(autext_test_set['word_len'].mean()))
-        print("total_distro_train_val_test: ", autext_train_set.shape, autext_val_set.shape, autext_test_set.shape)
+
+        if print_info:
+            print("autext_train_set: ", autext_train_set.info())
+            print("\n min_max_avg_token Train: ", autext_train_set['word_len'].min(), autext_train_set['word_len'].max(), int(autext_train_set['word_len'].mean()))
+            print("min_max_avg_token Val:   ", autext_val_set['word_len'].min(), autext_val_set['word_len'].max(),  int(autext_val_set['word_len'].mean()))
+            print("min_max_avg_token Test:  ", autext_test_set['word_len'].min(), autext_test_set['word_len'].max(), int(autext_test_set['word_len'].mean()))
+            print("total_distro_train_val_test: ", autext_train_set.shape, autext_val_set.shape, autext_test_set.shape)
 
         min_token_len = 1
         max_token_len = 5000
         autext_train_set = autext_train_set[(autext_train_set['word_len'] >= min_token_len) & (autext_train_set['word_len'] <= max_token_len)]
         autext_val_set = autext_val_set[(autext_val_set['word_len'] >= min_token_len) & (autext_val_set['word_len'] <= max_token_len)]
+
         #autext_train_set, autext_val_set = train_test_split(autext_train_set, test_size=0.3)
-        print("label_distro_train_val_test: ", autext_train_set.value_counts('label'), autext_val_set.value_counts('label'), autext_test_set.value_counts('label'))
+        if print_info:
+            print("label_distro_train_val_test: ", autext_train_set.value_counts('label'), autext_val_set.value_counts('label'), autext_test_set.value_counts('label'))
 
-        print(autext_train_set.nlargest(5, ['word_len']) )
-        #autext_val_set = pd.concat([autext_val_set, autext_val_set_2], axis=0)
+            print(autext_train_set.nlargest(5, ['word_len']) )
+            #autext_val_set = pd.concat([autext_val_set, autext_val_set_2], axis=0)
 
-
-        print("autext_train_set: ", autext_train_set.info())
-        print("autext_val_set: ", autext_val_set.info())
-        print("autext_test_set: ", autext_test_set.info())
-        print(autext_train_set['model'].value_counts())
-        print(autext_val_set['model'].value_counts())
+            print("autext_train_set: ", autext_train_set.info())
+            print("autext_val_set: ", autext_val_set.info())
+            print("autext_test_set: ", autext_test_set.info())
+            print(autext_train_set['model'].value_counts())
+            print(autext_val_set['model'].value_counts())
         
         return autext_train_set, autext_val_set, autext_test_set
 
@@ -137,40 +143,99 @@ def read_dataset(dataset_name):
         autext_train_set = utils.read_csv(file_path=f'{utils.DATASET_DIR}autext2023/{subtask}/train_set.csv') 
         autext_val_set = utils.read_csv(file_path=f'{utils.DATASET_DIR}autext2023/{subtask}/val_set.csv') 
         autext_test_set = utils.read_csv(file_path=f'{utils.DATASET_DIR}autext2023/{subtask}/test_set.csv') 
+        
         autext_train_set = autext_train_set.sample(frac=1).reset_index(drop=True)
         autext_val_set = autext_val_set.sample(frac=1).reset_index(drop=True)
-        autext_test_set = autext_test_set.sample(frac=1).reset_index(drop=True)
+        #autext_test_set = autext_test_set.sample(frac=1).reset_index(drop=True)
         
         autext_train_set.rename(columns={'domain': 'source'}, inplace=True)
         autext_val_set.rename(columns={'domain': 'source'}, inplace=True)
         autext_test_set.rename(columns={'domain': 'source'}, inplace=True)
 
-        print("autext_train_set: ", autext_train_set.info())
-        print("autext_val_set: ", autext_val_set.info())
-        print("autext_test_set: ", autext_test_set.info())
-        print("total_distro_train_val_test: ", autext_train_set.shape, autext_val_set.shape, autext_test_set.shape)
-        print("label_distro_train_val_test: ", autext_train_set.value_counts('label'), autext_val_set.value_counts('label'), autext_test_set.value_counts('label'))
-        print("source_distro_train_val_test: ", autext_train_set.value_counts('source'), autext_val_set.value_counts('source'), autext_test_set.value_counts('source'))
-        print("model_distro_train_val_test: ", autext_train_set.value_counts('model'), autext_val_set.value_counts('model'), autext_test_set.value_counts('model'))
-        
-        # Model distribution for each source
-        print("Model distribution per source in Train set:\n", autext_train_set.groupby("source")["model"].value_counts())
-        print("Model distribution per source in Validation set:\n", autext_val_set.groupby("source")["model"].value_counts())
-        print("Model distribution per source in Test set:\n", autext_test_set.groupby("source")["model"].value_counts())
+        if print_info:
+            print("autext_train_set: ", autext_train_set.info())
+            print("autext_val_set: ", autext_val_set.info())
+            print("autext_test_set: ", autext_test_set.info())
+            print("total_distro_train_val_test: ", autext_train_set.shape, autext_val_set.shape, autext_test_set.shape)
+            print("label_distro_train_val_test: ", autext_train_set.value_counts('label'), autext_val_set.value_counts('label'), autext_test_set.value_counts('label'))
+            print("source_distro_train_val_test: ", autext_train_set.value_counts('source'), autext_val_set.value_counts('source'), autext_test_set.value_counts('source'))
+            print("model_distro_train_val_test: ", autext_train_set.value_counts('model'), autext_val_set.value_counts('model'), autext_test_set.value_counts('model'))
+            
+            # Model distribution for each source
+            print("Model distribution per source in Train set:\n", autext_train_set.groupby("source")["model"].value_counts())
+            print("Model distribution per source in Validation set:\n", autext_val_set.groupby("source")["model"].value_counts())
+            print("Model distribution per source in Test set:\n", autext_test_set.groupby("source")["model"].value_counts())
 
-        # Label distribution for each source
-        print("Label distribution per source in Train set:\n", autext_train_set.groupby("source")["label"].value_counts())
-        print("Label distribution per source in Validation set:\n", autext_val_set.groupby("source")["label"].value_counts())
-        print("Label distribution per source in Test set:\n", autext_test_set.groupby("source")["label"].value_counts())
+            # Label distribution for each source
+            print("Label distribution per source in Train set:\n", autext_train_set.groupby("source")["label"].value_counts())
+            print("Label distribution per source in Validation set:\n", autext_val_set.groupby("source")["label"].value_counts())
+            print("Label distribution per source in Test set:\n", autext_test_set.groupby("source")["label"].value_counts())
 
 
         autext_train_set['word_len'] = autext_train_set['text'].str.split().str.len()
         autext_val_set['word_len'] = autext_val_set['text'].str.split().str.len()
         autext_test_set['word_len'] = autext_test_set['text'].str.split().str.len()
-        print("min_max_avg_token Train: ", autext_train_set['word_len'].min(), autext_train_set['word_len'].max(), int(autext_train_set['word_len'].mean()))
-        print("min_max_avg_token Val:   ", autext_val_set['word_len'].min(), autext_val_set['word_len'].max(),  int(autext_val_set['word_len'].mean()))
-        print("min_max_avg_token Test:  ", autext_test_set['word_len'].min(), autext_test_set['word_len'].max(), int(autext_test_set['word_len'].mean()))
+        if print_info: 
+            print("min_max_avg_token Train: ", autext_train_set['word_len'].min(), autext_train_set['word_len'].max(), int(autext_train_set['word_len'].mean()))
+            print("min_max_avg_token Val:   ", autext_val_set['word_len'].min(), autext_val_set['word_len'].max(),  int(autext_val_set['word_len'].mean()))
+            print("min_max_avg_token Test:  ", autext_test_set['word_len'].min(), autext_test_set['word_len'].max(), int(autext_test_set['word_len'].mean()))
         
+        return autext_train_set, autext_val_set, autext_test_set
+
+    # ****************************** READ DATASET AUTEXT 2023
+    if dataset_name in ['autext24', 'autext24_s2']:
+        
+        #dataset_name = 'autext23' # autext23, autext23_s2
+        if dataset_name == 'autext24': # subtask1, subtask2
+            subtask = 'subtask1' 
+        if dataset_name == 'autext24_s2':
+            subtask = 'subtask2' #
+        
+        autext_train_set = utils.read_csv(file_path=f'{utils.DATASET_DIR}autext2024/{subtask}/train_set.csv') 
+        autext_val_set = utils.read_csv(file_path=f'{utils.DATASET_DIR}autext2024/{subtask}/val_set.csv') 
+        autext_test_set = utils.read_csv(file_path=f'{utils.DATASET_DIR}autext2024/{subtask}/test_set.csv') 
+        
+        autext_train_set = autext_train_set.sample(frac=1).reset_index(drop=True)
+        autext_val_set = autext_val_set.sample(frac=1).reset_index(drop=True)
+        #autext_test_set = autext_test_set.sample(frac=1).reset_index(drop=True)
+        
+        autext_train_set.rename(columns={'domain': 'source'}, inplace=True)
+        autext_val_set.rename(columns={'domain': 'source'}, inplace=True)
+        autext_test_set.rename(columns={'domain': 'source'}, inplace=True)
+
+        if print_info:
+            print("autext_train_set: ", autext_train_set.info())
+            print("autext_val_set: ", autext_val_set.info())
+            print("autext_test_set: ", autext_test_set.info())
+            print("total_distro_train_val_test: ", autext_train_set.shape, autext_val_set.shape, autext_test_set.shape)
+            print("label_distro_train_val_test: ", autext_train_set.value_counts('label'), autext_val_set.value_counts('label'), autext_test_set.value_counts('label'))
+            print("source_distro_train_val_test: ", autext_train_set.value_counts('source'), autext_val_set.value_counts('source'), autext_test_set.value_counts('source'))
+            print("model_distro_train_val_test: ", autext_train_set.value_counts('model'), autext_val_set.value_counts('model'), autext_test_set.value_counts('model'))
+            print("language_distro_train_val_test: ", autext_train_set.value_counts('language'), autext_val_set.value_counts('language'), autext_test_set.value_counts('language'))
+            
+            # Model distribution for each source
+            print("Model distribution per source in Train set:\n", autext_train_set.groupby("source")["model"].value_counts())
+            print("Model distribution per source in Validation set:\n", autext_val_set.groupby("source")["model"].value_counts())
+            print("Model distribution per source in Test set:\n", autext_test_set.groupby("source")["model"].value_counts())
+
+            # Label distribution for each source
+            print("Label distribution per source in Train set:\n", autext_train_set.groupby("source")["label"].value_counts())
+            print("Label distribution per source in Validation set:\n", autext_val_set.groupby("source")["label"].value_counts())
+            print("Label distribution per source in Test set:\n", autext_test_set.groupby("source")["label"].value_counts())
+
+            # Label distribution for each source
+            print("language distribution per source in Train set:\n", autext_train_set.groupby("language")["label"].value_counts())
+            print("language distribution per source in Validation set:\n", autext_val_set.groupby("language")["label"].value_counts())
+            print("language distribution per source in Test set:\n", autext_test_set.groupby("language")["label"].value_counts())
+
+        autext_train_set['word_len'] = autext_train_set['text'].str.split().str.len()
+        autext_val_set['word_len'] = autext_val_set['text'].str.split().str.len()
+        autext_test_set['word_len'] = autext_test_set['text'].str.split().str.len()
+        if print_info:
+            print("min_max_avg_token Train: ", autext_train_set['word_len'].min(), autext_train_set['word_len'].max(), int(autext_train_set['word_len'].mean()))
+            print("min_max_avg_token Val:   ", autext_val_set['word_len'].min(), autext_val_set['word_len'].max(),  int(autext_val_set['word_len'].mean()))
+            print("min_max_avg_token Test:  ", autext_test_set['word_len'].min(), autext_test_set['word_len'].max(), int(autext_test_set['word_len'].mean()))
+            
         return autext_train_set, autext_val_set, autext_test_set
 
     # ****************************** READ DATASET COLING 2024
@@ -179,44 +244,52 @@ def read_dataset(dataset_name):
         autext_train_set = utils.read_json(dir_path=f'{utils.DATASET_DIR}coling2024/en_train.jsonl')
         autext_val_set = utils.read_json(dir_path=f'{utils.DATASET_DIR}coling2024/en_dev.jsonl')
         autext_test_set = utils.read_json(dir_path=f'{utils.DATASET_DIR}coling2024/test_set_en_with_label.jsonl')
+        
         autext_train_set = autext_train_set.sample(frac=1).reset_index(drop=True)
         autext_val_set = autext_val_set.sample(frac=1).reset_index(drop=True)
-        autext_test_set = autext_test_set.sample(frac=1).reset_index(drop=True)
+        #autext_test_set = autext_test_set.sample(frac=1).reset_index(drop=True)
+
+        autext_test_set['id'] = range(len(autext_test_set))
+        
         #autext_test_set = autext_test_set[['testset_id', 'label', 'text']]
-        #print("distro_train_val_test: ", autext_train_set.shape, autext_val_set.shape, autext_test_set.shape)
-        print("autext_train_set: ", autext_train_set.info())
-        print("autext_val_set: ", autext_val_set.info())
-        print("autext_test_set: ", autext_test_set.info())
+        if print_info:
+            #print("distro_train_val_test: ", autext_train_set.shape, autext_val_set.shape, autext_test_set.shape)
+            print("autext_train_set: ", autext_train_set.info())
+            print("autext_val_set: ", autext_val_set.info())
+            print("autext_test_set: ", autext_test_set.info())
 
-        # Model distribution for each source
-        print("Model distribution per source in Train set:\n", autext_train_set.groupby("source")["model"].value_counts())
-        print("Model distribution per source in Validation set:\n", autext_val_set.groupby("source")["model"].value_counts())
-        print("Model distribution per source in Test set:\n", autext_test_set.groupby("source")["model"].value_counts())
+            # Model distribution for each source
+            print("Model distribution per source in Train set:\n", autext_train_set.groupby("source")["model"].value_counts())
+            print("Model distribution per source in Validation set:\n", autext_val_set.groupby("source")["model"].value_counts())
+            print("Model distribution per source in Test set:\n", autext_test_set.groupby("source")["model"].value_counts())
 
-        # Label distribution for each source
-        print("Label distribution per source in Train set:\n", autext_train_set.groupby("source")["label"].value_counts())
-        print("Label distribution per source in Validation set:\n", autext_val_set.groupby("source")["label"].value_counts())
-        print("Label distribution per source in Test set:\n", autext_test_set.groupby("source")["label"].value_counts())
+            # Label distribution for each source
+            print("Label distribution per source in Train set:\n", autext_train_set.groupby("source")["label"].value_counts())
+            print("Label distribution per source in Validation set:\n", autext_val_set.groupby("source")["label"].value_counts())
+            print("Label distribution per source in Test set:\n", autext_test_set.groupby("source")["label"].value_counts())
 
         autext_train_set['word_len'] = autext_train_set['text'].str.split().str.len()
         autext_val_set['word_len'] = autext_val_set['text'].str.split().str.len()
         autext_test_set['word_len'] = autext_test_set['text'].str.split().str.len()
-        print("min_max_avg_token Train: ", autext_train_set['word_len'].min(), autext_train_set['word_len'].max(), int(autext_train_set['word_len'].mean()))
-        print("min_max_avg_token Val:   ", autext_val_set['word_len'].min(), autext_val_set['word_len'].max(),  int(autext_val_set['word_len'].mean()))
-        print("min_max_avg_token Test:  ", autext_test_set['word_len'].min(), autext_test_set['word_len'].max(), int(autext_test_set['word_len'].mean()))
-        print("total_distro_train_val_test: ", autext_train_set.shape, autext_val_set.shape, autext_test_set.shape)
+        if print_info:
+            print("min_max_avg_token Train: ", autext_train_set['word_len'].min(), autext_train_set['word_len'].max(), int(autext_train_set['word_len'].mean()))
+            print("min_max_avg_token Val:   ", autext_val_set['word_len'].min(), autext_val_set['word_len'].max(),  int(autext_val_set['word_len'].mean()))
+            print("min_max_avg_token Test:  ", autext_test_set['word_len'].min(), autext_test_set['word_len'].max(), int(autext_test_set['word_len'].mean()))
+            print("total_distro_train_val_test: ", autext_train_set.shape, autext_val_set.shape, autext_test_set.shape)
 
         min_token_text = 1
         max_token_text = 1500
         autext_train_set = autext_train_set[(autext_train_set['word_len'] >= min_token_text) & (autext_train_set['word_len'] <= max_token_text)]
         autext_val_set = autext_val_set[(autext_val_set['word_len'] >= min_token_text) & (autext_val_set['word_len'] <= max_token_text)]
-        print("label_distro_train_val_test: ", autext_train_set.value_counts('label'), autext_val_set.value_counts('label'), autext_test_set.value_counts('label'))
-        #print(autext_train_set.nlargest(5, ['word_len']) )
 
-        print("distro_train_val_test: ", autext_train_set.shape, autext_val_set.shape, autext_test_set.shape)
-        #print(autext_train_set['model'].value_counts())
-        #print(autext_val_set['model'].value_counts())
-        
+        if print_info:
+            print("label_distro_train_val_test: ", autext_train_set.value_counts('label'), autext_val_set.value_counts('label'), autext_test_set.value_counts('label'))
+            #print(autext_train_set.nlargest(5, ['word_len']) )
+
+            print("distro_train_val_test: ", autext_train_set.shape, autext_val_set.shape, autext_test_set.shape)
+            #print(autext_train_set['model'].value_counts())
+            #print(autext_val_set['model'].value_counts())
+            
         return autext_train_set, autext_val_set, autext_test_set
 
     
@@ -334,3 +407,5 @@ def approximate_clustering_coefficient(edges, num_nodes, k=100):
         clustering_coeff_tensor[node] = value
 
     return clustering_coeff_tensor
+
+

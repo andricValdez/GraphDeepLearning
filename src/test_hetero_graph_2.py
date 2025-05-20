@@ -27,6 +27,8 @@ from datasets import load_dataset
 import joblib
 from joblib import Parallel, delayed
 from sklearn.model_selection import train_test_split
+import matplotlib.pyplot as plt 
+import seaborn as sns
 import networkx as nx
 import networkx
 import sys, traceback, time
@@ -43,7 +45,7 @@ from spacy.util import compile_prefix_regex, compile_infix_regex, compile_suffix
 from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 import itertools
 from math import log
-from sklearn.metrics import accuracy_score, f1_score
+from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
 from transformers import logging
 from transformers import AutoTokenizer, AutoModel, Trainer, AutoModelForSequenceClassification, TrainingArguments
 from transformers import BertForSequenceClassification, RobertaForSequenceClassification
@@ -87,6 +89,8 @@ from sklearn.feature_extraction.text import TfidfTransformer
 import torch
 import gc
 import spacy
+import mlflow
+from mlflow import MlflowClient
 
 from nltk.corpus import stopwords
 from nltk.stem import PorterStemmer
@@ -102,6 +106,11 @@ nlp = spacy.load("en_core_web_sm", disable=["ner", "parser"])
 
 #************************************* CONFIGS
 warnings.filterwarnings("ignore")
+mlflow.set_tracking_uri(uri="http://localhost:8081")
+mlflow.set_tracking_uri("/home/avaldez/projects/GraphDeepLearning/mlruns")
+client = MlflowClient()
+experiment_id = "0"
+run = client.create_run(experiment_id)
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 #************************************* CONFIGS
@@ -129,36 +138,51 @@ class EarlyStopper:
         return False
 
 class GNN(nn.Module):
-    def __init__(self, input_dim, hidden_dim, dense_hidden_dim, output_dim, dropout, num_layers, edge_attr=False, gnn_type='GCNConv', heads=1, task='node', directed=False):
+    def __init__(
+        self,
+        input_dim,
+        hidden_dim,
+        dense_hidden_dim,
+        output_dim,
+        dropout,
+        num_layers,
+        edge_attr=False,
+        gnn_type='GCNConv',
+        heads=1,
+        directed = False,
+        norm_type='batchnorm',   # 'batchnorm', 'layernorm', or None
+        post_mp_layers=3,        # number of layers after message passing
+    ):
         super(GNN, self).__init__()
-        self.task = task
         self.heads = heads
         self.gnn_type = gnn_type
         self.edge_attr = edge_attr
-        self.embeddings = []  # List to store embeddings after each layer
-
-        self.directed = directed  # Add directed parameter
-        self.conv1 = self.build_conv_model(input_dim, hidden_dim, self.heads)
-        self.norm1 = nn.BatchNorm1d(hidden_dim * heads) # BatchNorm1d, LayerNorm
-        self.convs = nn.ModuleList()
-        self.lns = nn.ModuleList()
-        for l in range(num_layers):
-            self.convs.append(self.build_conv_model(hidden_dim * heads, hidden_dim, self.heads))
-            self.lns.append(nn.BatchNorm1d(hidden_dim * heads))
-
-        # Post-message-passing
-        self.post_mp = nn.Sequential(
-            nn.Linear(hidden_dim * heads, dense_hidden_dim),
-            #nn.Dropout(dropout),
-            #nn.LayerNorm(dense_hidden_dim),
-            nn.Linear(dense_hidden_dim, int(dense_hidden_dim // 2)),
-            #nn.Dropout(dropout),
-            #nn.LayerNorm(int(dense_hidden_dim // 2)),
-            nn.Linear(int(dense_hidden_dim // 2), output_dim),
-        )
-
         self.dropout = dropout
         self.num_layers = num_layers
+        self.norm_type = norm_type
+        self.embeddings = []
+        self.directed = directed  # Add directed parameter
+
+        # First conv
+        self.conv1 = self.build_conv_model(input_dim, hidden_dim, heads)
+        self.norm1 = self.build_norm_layer(hidden_dim * heads)
+
+        # Additional conv layers
+        self.convs = nn.ModuleList()
+        self.norms = nn.ModuleList()
+        for _ in range(num_layers):
+            self.convs.append(self.build_conv_model(hidden_dim * heads, hidden_dim, heads))
+            self.norms.append(self.build_norm_layer(hidden_dim * heads))
+
+        # Post-message-passing MLP
+        dims = [hidden_dim * heads] + [dense_hidden_dim // (2 ** i) for i in range(post_mp_layers - 1)] + [output_dim]
+        post_mp = []
+        for i in range(len(dims) - 1):
+            post_mp.append(nn.Linear(dims[i], dims[i + 1]))
+            #if i < len(dims) - 2:
+            #    post_mp.append(nn.ReLU())
+        self.post_mp = nn.Sequential(*post_mp)
+
 
     def build_conv_model(self, input_dim, hidden_dim, heads):
         if self.gnn_type == 'GCNConv':
@@ -171,6 +195,14 @@ class GNN(nn.Module):
             else:    
                 return TransformerConv(input_dim, hidden_dim, heads=heads)
     
+    def build_norm_layer(self, dim):
+        if self.norm_type == 'batchnorm':
+            return nn.BatchNorm1d(dim)
+        elif self.norm_type == 'layernrom':
+            return nn.LayerNorm(dim)
+        else:
+            return nn.Identity()
+        
     def forward(self, x, edge_index, edge_attr=None, batch=None, return_attention=False):
         # Handle undirected graphs by adding reverse edges
         #if not self.directed:
@@ -208,18 +240,15 @@ class GNN(nn.Module):
             emb = x
             x = F.relu(x)
             #self.embeddings.append(x.detach().cpu().numpy())
-            x = self.lns[i](x)
+            x = self.norms[i](x)
             x = F.dropout(x, p=self.dropout, training=self.training)
 
-        if self.task == 'graph':
-            x = global_mean_pool(x, batch)
-
-        x = self.post_mp(x)
+        logits = self.post_mp(x)
         #if return_attention:
         #    return edge_attentions  # Return attention coefficients
         
         #return emb, self.embeddings, F.log_softmax(x, dim=1)
-        return emb, self.embeddings, x
+        return emb, self.embeddings, logits
 
 def train(model, loader, optimizer, criterion, device):
     model.train()
@@ -284,14 +313,14 @@ def evaluate(model, loader, criterion, mask_type, device):
             total_f1 += f1
             total_nodes += mask.sum().item()
 
-            #all_preds.extend(pred[mask].cpu().numpy())
-            #all_labels.extend(batch.y[mask].cpu().numpy())
+            all_preds.extend(pred[mask].cpu().numpy())
+            all_labels.extend(batch.y[mask].cpu().numpy())
 
     acc = total_correct / total_nodes
     f1_macro = total_f1 / len(loader)
     loss = total_loss / len(loader)
 
-    return acc, f1_macro, loss
+    return acc, f1_macro, loss, all_preds, all_labels
 
 def get_document_embeddings(text, tokenizer, language_model, device):
     # Tokenize the document and convert to tensor
@@ -539,6 +568,16 @@ def extract_gnn_embeddings(model, data, data_loader):
 
     return test_embeddings, test_node_indices
 
+def log_conf_matrix(y_pred, y_true):
+    # Log confusion matrix as image
+    cm = confusion_matrix(y_pred, y_true)
+    classes = ["0", "1"]
+    df_cfm = pd.DataFrame(cm, index = classes, columns = classes)
+    plt.figure(figsize = (10,7))
+    cfm_plot = sns.heatmap(df_cfm, annot=True, cmap='Blues', fmt='g')
+    cfm_plot.figure.savefig(f'{utils.OUTPUT_DIR_PATH}/images/cm.png')
+    mlflow.log_artifact(f"{utils.OUTPUT_DIR_PATH}/images/cm.png")
+
 def train_mlp():
     cut_off_dataset = '1-1-1'
     dataset = "coling24" # autext23, semeval24, coling24
@@ -616,10 +655,12 @@ def nlp_pipeline(docs: list):
         doc_lst.append(nlp_doc)
     return doc_lst
 
+def regex_tokenizer(text):
+    return re.findall(r'\w+|[^\w\s]', text, re.UNICODE)
 
-def create_vocab_v1(all_texts_norm, stop_words=False, special_chars=False, min_df=1, max_df=1.0, max_features=5000):
+def create_vocab_v1(all_texts_norm, stop_words=False, special_chars=False, min_df=1, max_df=1.0, max_features=5000, tokenize_pattern=regex_tokenizer):
     tokenized_corpus = []
-    for text_norm in tqdm(all_texts_norm, desc="Tokenazing corpus"):
+    '''for text_norm in tqdm(all_texts_norm, desc="Tokenazing corpus"):
             doc = nlp(text_norm)
             tokens = []
             for token in doc:
@@ -628,10 +669,10 @@ def create_vocab_v1(all_texts_norm, stop_words=False, special_chars=False, min_d
                 if special_chars and token.is_punct:
                     continue
                 tokens.append(token.text) # text, lemma_, pos_
-            tokenized_corpus.append(tokens)
+            tokenized_corpus.append(tokens)'''
 
     # Create vocabulary and TF-IDF features
-    vectorizer = CountVectorizer(min_df=min_df, max_df=max_df, max_features=max_features)
+    vectorizer = CountVectorizer(min_df=min_df, max_df=max_df, max_features=max_features, token_pattern=None, tokenizer=regex_tokenizer)
     X = vectorizer.fit_transform(all_texts_norm)
     tfidf_transformer = TfidfTransformer()
     X_tfidf = tfidf_transformer.fit_transform(X)
@@ -639,6 +680,23 @@ def create_vocab_v1(all_texts_norm, stop_words=False, special_chars=False, min_d
     word_to_index = {word: idx for idx, word in enumerate(vocab)}
     return vocab, word_to_index, tokenized_corpus, X_tfidf, X
 
+def balance_df(df):
+    if 'source' not in df.columns or 'label' not in df.columns:
+        raise ValueError("DataFrame must contain 'source' and 'label' columns")
+
+    balanced_parts = []
+    for domain, domain_df in df.groupby("source"):
+        label_counts = domain_df['label'].value_counts()
+        if len(label_counts) < 2:
+            balanced_parts.append(domain_df)
+            continue
+
+        min_count = min(label_counts[0], label_counts[1])
+        df_0 = domain_df[domain_df['label'] == 0].sample(min_count, random_state=42)
+        df_1 = domain_df[domain_df['label'] == 1].sample(min_count, random_state=42)
+        balanced_parts.append(pd.concat([df_0, df_1]))
+
+    return pd.concat(balanced_parts).sample(frac=1, random_state=42).reset_index(drop=True)
 
 def create_vocab_v2(all_texts_norm, stop_words=False, special_chars=False, min_df=1, max_features=5000):
     docs_nlp_spacy = nlp_pipeline(all_texts_norm)
@@ -669,8 +727,30 @@ def create_vocab_v2(all_texts_norm, stop_words=False, special_chars=False, min_d
     X = vectorizer.fit_transform(all_texts_norm)
     tfidf_transformer = TfidfTransformer()
     X_tfidf = tfidf_transformer.fit_transform(X)
-
+ 
     return vocab, word_to_index, tokenized_corpus, X_tfidf, X
+
+def build_projector(input_dim=768, hidden_dim=512, output_dim=256, dropout=0.1, num_layers=2, use_norm=True, activation='relu'):
+    layers = []
+    dim_in = input_dim
+
+    for i in range(num_layers):
+        dim_out = output_dim if i == num_layers - 1 else hidden_dim
+        layers.append(nn.Linear(dim_in, dim_out))
+
+        if i < num_layers - 1:
+            if use_norm:
+                layers.append(nn.BatchNorm1d(dim_out))  # or nn.BatchNorm1d
+            if activation == 'relu':
+                layers.append(nn.ReLU())
+            elif activation == 'gelu':
+                layers.append(nn.GELU())
+            elif activation == 'leaky_relu':
+                layers.append(nn.LeakyReLU(negative_slope=0.1))
+            layers.append(nn.Dropout(dropout))
+
+        dim_in = dim_out
+    return nn.Sequential(*layers)
 
 # ************************************************************ TMP DELETE
 def load_corpus(output_path, dataset_str):
@@ -723,522 +803,626 @@ def main():
     # autext23_s2, 
     # semeval24_s2
     config = {
-        'build_graph': True,
-        'dataset_name': 'semeval24', # autext23, semeval24, coling24, autext23_s2, semeval24_s2
-        'cut_off_dataset': '5-5-5', # train-val-test
+        'build_graph': False,
+        'dataset_name': 'autext24', # autext23, autext24, semeval24, coling24, autext23_s2, semeval24_s2
+        'cut_off_dataset': '100-100-100', # train-val-test
         "nfi": 'llm', # llm, w2v, random
-        'cuda_num': 1,
+        'cuda_num': 0,
 
         'window_size': 10,
         'graph_direction': 'undirected', # undirected | directed (for now all are undirecte, pending to handle and review to support both)
         'special_chars': False,
         'stop_words': False,
-        'min_df': 2, # 1->autext | 5->semeval | 5-coling
-        'max_df': 0.9,
+        'min_df': 5, # 1->autext | 5->semeval | 5-coling
+        'max_df': 1.0,
         'max_features': 15000, # None -> all | 5000
         'not_found_tokens': 'avg', # avg, remove, zeros, ones
         'add_edge_attr': True,
         'add_graph_metric': False,
-        'embed_reduction': True, 
-        'reduce_dim_to': 256, # 128, 256
+        'embed_reduction': False, # False -> 768
+        'reduce_dim_to': 256, # 128, 256 
 
         "gnn_type": 'TransformerConv', # GCNConv, GATConv, TransformerConv
         "dropout": 0.5,
-        "patience": 5, # 5-autext23 | 10-semeval | 10-coling
-        "learnin_rate": 0.00005, # autext23 -> llm: 0.00002 | semeval -> llm: 0.000005  | coling -> llm: 0.0001 
+        "patience":10, # 5-autext23 | 10-semeval | 10-coling
+        "learnin_rate": 0.0002, # autext23 -> llm: 0.00002 | semeval -> llm: 0.000005  | coling -> llm: 0.0001 
         "batch_size": 512 * 1,
         "hidden_dim": 100, # 300 autext_s2, 100 others
-        "dense_hidden_dim": 32, # 64-autext23 | 32-semeval | 64-coling
+        "dense_hidden_dim": 64, # 64-autext23 | 32-semeval | 64-coling
         "num_layers": 1,
         "heads": 1,
-        "output_dim": 2, # 2-bin | 6-multi 
+        "norm_type": None,   # 'batchnorm', 'layernorm', or None
+        "post_mp_layers": 2,        # number of layers after message passing
+
         "weight_decay": 5e-4, 
-        "num_neighbors": [100, 75],  # Adjust sampling depth
-        'input_dim': 768,
+        "num_neighbors": [100, 75],  # Autext -> [100, 75]
+        "output_dim": 2, # 2-bin | 6-multi 
+        'input_dim': 768, # setting below
         'epochs': 200,
-        "llm_name": 'microsoft/deberta-v3-base',
+
+        ## intfloat/multilingual-e5-large
+        ## google-bert/bert-base-multilingual-uncased
+        ## FacebookAI/xlm-roberta-base
+        ## microsoft/deberta-v3-base
+        "llm_name": 'FacebookAI/roberta-base',
+        'leave_out_sources': True, # True, False
 
     }
 
-    ## google-bert/bert-base-uncased
-    ## FacebookAI/roberta-base
-    ## microsoft/deberta-v3-base
-    #llm_name = 'microsoft/deberta-v3-base'
-    
-    file_name_data = f"hetero_data_{config['dataset_name']}_{config['cut_off_dataset']}perc" # perc_128
-    #output_dir = f'{utils.OUTPUT_DIR_PATH}test_graph/{llm_name.split("/")[1]}/'
-    #output_dir = f'{utils.OUTPUT_DIR_PATH}test_graph/'
-    output_dir = f'{test_utils.EXTERNAL_DISK_PATH}hetero_graph'
+    mlflow.set_experiment(f"GNN - HETERO")
+    run_description = f"""Run experiment for GNN Classification Task using dataset {config['dataset_name']} with {config['cut_off_dataset']} % cutoff."""
+    run_tags = {
+        'mlflow.note.content': run_description,
+        'mlflow.source.type': "LOCAL"
+    }
 
-    nfi_dir = config["llm_name"].split("/")[1] # nfi -> llm
-    if config['nfi'] == 'w2v':
-        nfi_dir = 'w2v'
-    if config['nfi'] == 'random':
-        nfi_dir = 'random'
+    with mlflow.start_run(tags=run_tags):
+        mlflow.set_tag("mlflow.runName", f"run_{config['dataset_name']}_{config['cut_off_dataset']}perc")
 
-    device = torch.device(f"cuda:{config['cuda_num']}" if torch.cuda.is_available() else "cpu")
-    pprint.pprint(config)
-    
-    if config['build_graph']:
-        start_time = time.time()
-        # Load and preprocess dataset
-        train_text_set, val_text_set, test_text_set = test_utils.read_dataset(config['dataset_name'])
+        if config['leave_out_sources']:
+            if config['dataset_name'] == 'autext23':
+                # Autext: ["wiki", "tweets", "legal"]
+                config['leave_out_sources'] = ["tweets"] 
+            elif config['dataset_name'] == 'autext24':
+                # Autext: ["literary", "news", "reviews", "tweets", "wikipedia"]
+                config['leave_out_sources'] = ["news", "literary"] 
+            elif config['dataset_name'] == 'semeval24':
+                # Semeval ["arxiv", "peerread", "reddit", "wikihow", "wikipedia"]
+                config['leave_out_sources'] = ["wikihow", "wikipedia"]
+            elif config['dataset_name'] == 'coling24':
+                # Coling: ["hc3", "m4gt", "mage"]
+                config['leave_out_sources'] = ["mage"]
 
-        # Cut off datasets
-        cut_off_train = int(config['cut_off_dataset'].split('-')[0])
-        cut_off_val = int(config['cut_off_dataset'].split('-')[1])
-        cut_off_test = int(config['cut_off_dataset'].split('-')[2])
-
-        train_set = train_text_set[:int(len(train_text_set) * (cut_off_train / 100))][:]
-        val_set = val_text_set[:int(len(val_text_set) * (cut_off_val / 100))][:]
-        test_set = test_text_set[:int(len(test_text_set) * (cut_off_test / 100))][:]
-
-        print("cutoff_distro_train_val_test: ", len(train_set), len(val_set), len(test_set))
-        print("label_distro_train_val_test: ", train_set.value_counts('label'), val_set.value_counts('label'), test_set.value_counts('label'))
+        ## google-bert/bert-base-uncased
+        ## FacebookAI/roberta-base
+        ## microsoft/deberta-v3-base
+        #llm_name = 'microsoft/deberta-v3-base'
         
-        # Combine texts and labels
-        all_texts = list(train_set['text']) + list(val_set['text']) + list(test_set['text'])
-        all_labels = list(train_set['label']) + list(val_set['label']) + list(test_set['label'])
+        file_name_data = f"hetero_data_{config['dataset_name']}_{config['cut_off_dataset']}perc" # perc_128
+        #output_dir = f'{utils.OUTPUT_DIR_PATH}test_graph/{llm_name.split("/")[1]}/'
+        #output_dir = f'{utils.OUTPUT_DIR_PATH}test_graph/'
+        output_dir = f'{test_utils.EXTERNAL_DISK_PATH}hetero_graph'
 
-        # Normalize texts and Tokenize texts
-        tokenized_corpus = []
-        all_texts_norm = []
-        for text in tqdm(all_texts, desc="Normalizing corpus"):
-            text_norm = test_utils.text_normalize(text, special_chars=config['special_chars'], stop_words=config['stop_words'])
-            all_texts_norm.append(text_norm)
-            #tokenized_corpus.append(re.findall("[A-Z]{2,}(?![a-z])|[A-Z][a-z]+(?=[A-Z])|[\'\w\-]+", text_norm))
-
-        # create vocab V1
-        #vocab, word_to_index, tokenized_corpus, X_tfidf, X = create_vocab_v1(all_texts_norm, stop_words=config['stop_words'], special_chars=config['special_chars'], min_df=config['min_df'], max_features=config['max_features'])
-
-        # create vocab V2
-        vocab, word_to_index, tokenized_corpus, X_tfidf, X = create_vocab_v2(all_texts_norm, stop_words=config['stop_words'], special_chars=config['special_chars'], min_df=config['min_df'], max_features=config['max_features'])
-
-        print('vocab: ', len(vocab))
-        with open(f"{output_dir}/{config['dataset_name']}_{config['cut_off_dataset']}.vocab.txt", 'w') as file:
-            for item in vocab:
-                file.write(str(item) + '\n')
-
-        # *** Generate embeddings method 2  - LLM 
-        if config['nfi'] == 'llm':
-            # Generate word and document embeddings
-            tokenizer = AutoTokenizer.from_pretrained(config['llm_name'], model_max_length=512)
-            language_model = AutoModel.from_pretrained(config['llm_name'], output_hidden_states=True).to(device)
-
-            # ******************** Generate word embeddings
-            # ********** batches
-            doc_features, word_features = get_word_doc_embeddings(all_texts_norm, tokenizer, language_model, vocab, device, not_found_tokens=config['not_found_tokens'], batch_size=32)
-            word_features = torch.tensor(word_features, dtype=torch.float)
-            doc_features = torch.tensor(doc_features, dtype=torch.float)
-
-            # ********** zeros init
-            #word_features = torch.zeros((len(vocab), config['input_dim']))
-            
-            # ********** batches - simple
-            #word_features = get_word_embeddings_batch(list(vocab), tokenizer, language_model, device, batch_size=128)
-            #word_features = torch.tensor(word_features, dtype=torch.float)
-
-            # ******************** Generate document embeddings
-            # ********** one by one
-            #doc_features = []
-            #for text in tqdm(all_texts_norm, desc="Extracting doc embeddings"):
-            #    doc_embedding = get_document_embeddings(text, tokenizer, language_model, device)
-            #    doc_features.append(doc_embedding)
-            #doc_features = torch.tensor(doc_features, dtype=torch.float)
-            
-            # ********** batches
-            #doc_features = get_document_embeddings_batch(all_texts_norm, tokenizer, language_model, device, batch_size=32)
-            #doc_features = torch.tensor(doc_features, dtype=torch.float)
-
+        nfi_dir = config["llm_name"].split("/")[1] # nfi -> llm
         if config['nfi'] == 'w2v':
-            # Generate word embeddings
-            w2v_model = Word2Vec(sentences=tokenized_corpus, vector_size=config['input_dim'], window=5, min_count=1, workers=4)
-            word_features, updated_vocab = [], []
-            for word in vocab:
-                if word in w2v_model.wv:
-                    word_features.append(w2v_model.wv[word])
-                    updated_vocab.append(word)
-                else:
-                    word_features.append(np.zeros(w2v_model.vector_size))  # Assign zero vector for missing words
-            word_features = torch.tensor(word_features, dtype=torch.float)
-            #vocab = updated_vocab
-            #word_to_index = {word: idx for idx, word in enumerate(vocab)}
-
-            # Generate document embeddings using Word2Vec-based averaging
-            doc_features = []
-            for text in tqdm(tokenized_corpus, desc="Extracting document embeddings"):
-                word_embeddings = [w2v_model.wv[word] for word in text if word in w2v_model.wv]
-                if len(word_embeddings) > 0:
-                    doc_embedding = np.mean(word_embeddings, axis=0)  # Average word embeddings
-                else:
-                    doc_embedding = np.zeros(w2v_model.vector_size)  # Default to zero vector if no words are found 
-                doc_features.append(torch.tensor(doc_embedding, dtype=torch.float))
-            doc_features = torch.stack(doc_features)  # Convert list of tensors to a single tensor
-                    
+            nfi_dir = 'w2v'
         if config['nfi'] == 'random':
-             # Generate word embeddings
-            word_features = np.random.uniform(low=-1, high=1, size=(len(vocab), config['input_dim']))
-            word_features = torch.tensor(word_features, dtype=torch.float)
-            # Generate random document embeddings
-            doc_features = []
-            for _ in tqdm(all_texts_norm, desc="Generating random document embeddings"):
-                doc_embedding = np.random.uniform(low=-1, high=1, size=(config['input_dim'],))
-                doc_features.append(torch.tensor(doc_embedding, dtype=torch.float))
-            doc_features = torch.stack(doc_features)  # Convert list of tensors to a single tensor
+            nfi_dir = 'random'
+
+        device = torch.device(f"cuda:{config['cuda_num']}" if torch.cuda.is_available() else "cpu")
+        pprint.pprint(config)
+        
+        if config['build_graph']:
+            start_time = time.time()
+            # Load and preprocess dataset
+            train_text_set, val_text_set, test_text_set = test_utils.read_dataset(config['dataset_name'])
+
+            if config['dataset_name'] == 'autext24':
+                train_text_set = train_text_set[train_text_set['language'] == 'en'].reset_index(drop=True)
+                val_text_set = val_text_set[val_text_set['language'] == 'en'].reset_index(drop=True)
+                test_text_set = test_text_set[test_text_set['language'] == 'en']
+
+            if config['leave_out_sources']:
+                print(f"[INFO] Leave-One-Source-Out setting: removing '{config['leave_out_sources']}' from train.")
+                #train_text_set = train_text_set[train_text_set['source'] != leave_out_source]
+                #val_text_set = val_text_set[val_text_set['source'] == leave_out_source]
+                
+                # Split train set: keep everything NOT in leave_out_sources, swap the rest
+                train_keep = train_text_set[~train_text_set['source'].isin(config['leave_out_sources'])]
+                train_swap = train_text_set[train_text_set['source'].isin(config['leave_out_sources'])]
+
+                # Split val set: keep only leave_out_sources, swap the rest
+                val_keep = val_text_set[val_text_set['source'].isin(config['leave_out_sources'])]
+                val_swap = val_text_set[~val_text_set['source'].isin(config['leave_out_sources'])]
+
+                # Combine to form new sets
+                #train_text_set = train_keep
+                train_text_set = pd.concat([train_keep, val_swap], ignore_index=True)
+                #val_text_set = val_keep
+                val_text_set = pd.concat([val_keep, train_swap], ignore_index=True)
+                
+                print("Train set distro:\n", train_text_set.groupby("source")["label"].value_counts())
+                print("Val set distro:\n", val_text_set.groupby("source")["label"].value_counts())
+
+            # Cut off datasets
+            cut_off_train = int(config['cut_off_dataset'].split('-')[0])
+            cut_off_val = int(config['cut_off_dataset'].split('-')[1])
+            cut_off_test = int(config['cut_off_dataset'].split('-')[2])
+
+            train_set = train_text_set[:int(len(train_text_set) * (cut_off_train / 100))][:]
+            val_set = val_text_set[:int(len(val_text_set) * (cut_off_val / 100))][:]
+            test_set = test_text_set[:int(len(test_text_set) * (cut_off_test / 100))][:]
+
+            #train_set = balance_df(train_set)
+            #val_set = balance_df(val_set)
+            print("distro_train_val_test: ", len(train_set), len(val_set), len(test_set))
+            print("label_distro_train_val_test: ", train_set.value_counts('label'), val_set.value_counts('label'), test_set.value_counts('label'))
+            print("Label distribution per source in Train set:\n", train_set.groupby("source")["label"].value_counts())
+            print("Label distribution per source in Validation set:\n", val_set.groupby("source")["label"].value_counts())
+            print("Label distribution per source in Test set:\n", test_set.groupby("source")["label"].value_counts())
+            
+            # Combine texts and labels
+            all_texts = list(train_set['text']) + list(val_set['text']) + list(test_set['text'])
+            all_labels = list(train_set['label']) + list(val_set['label']) + list(test_set['label'])
+
+            # Normalize texts and Tokenize texts
+            tokenized_corpus = []
+            all_texts_norm = []
+            for text in tqdm(all_texts, desc="Normalizing corpus"):
+                text_norm = test_utils.text_normalize(text, special_chars=config['special_chars'], stop_words=config['stop_words'])
+                all_texts_norm.append(text_norm)
+                #tokenized_corpus.append(re.findall(r'\w+|[^\w\s]', text, re.UNICODE))
+
+            # create vocab V1
+            #vocab, word_to_index, _, X_tfidf, X = create_vocab_v1(all_texts_norm, stop_words=config['stop_words'], special_chars=config['special_chars'], min_df=config['min_df'], max_features=config['max_features'], tokenize_pattern=regex_tokenizer)
+
+            # create vocab V2
+            vocab, word_to_index, tokenized_corpus, X_tfidf, X = create_vocab_v2(all_texts_norm, stop_words=config['stop_words'], special_chars=config['special_chars'], min_df=config['min_df'], max_features=config['max_features'])
+
+            print('vocab: ', len(vocab))
+            with open(f"{output_dir}/{config['dataset_name']}_{config['cut_off_dataset']}.vocab.txt", 'w') as file:
+                for item in vocab:
+                    file.write(str(item) + '\n')
+
+            # *** Generate embeddings method 2  - LLM 
+            if config['nfi'] == 'llm':
+                # Generate word and document embeddings
+                tokenizer = AutoTokenizer.from_pretrained(config['llm_name'], model_max_length=512)
+                language_model = AutoModel.from_pretrained(config['llm_name'], output_hidden_states=True).to(device)
+                config['input_dim'] = language_model.config.hidden_size
+
+                # ******************** Generate word embeddings
+                # ********** batches
+                doc_features, word_features = get_word_doc_embeddings(all_texts_norm, tokenizer, language_model, vocab, device, not_found_tokens=config['not_found_tokens'], batch_size=32)
+                word_features = torch.tensor(word_features, dtype=torch.float)
+                doc_features = torch.tensor(doc_features, dtype=torch.float)
+
+                # ********** zeros init
+                #word_features = torch.zeros((len(vocab), config['input_dim']))
+                
+                # ********** batches - simple
+                #word_features = get_word_embeddings_batch(list(vocab), tokenizer, language_model, device, batch_size=128)
+                #word_features = torch.tensor(word_features, dtype=torch.float)
+
+                # ******************** Generate document embeddings
+                # ********** one by one
+                #doc_features = []
+                #for text in tqdm(all_texts_norm, desc="Extracting doc embeddings"):
+                #    doc_embedding = get_document_embeddings(text, tokenizer, language_model, device)
+                #    doc_features.append(doc_embedding)
+                #doc_features = torch.tensor(doc_features, dtype=torch.float)
+                
+                # ********** batches
+                #doc_features = get_document_embeddings_batch(all_texts_norm, tokenizer, language_model, device, batch_size=32)
+                #doc_features = torch.tensor(doc_features, dtype=torch.float)
+
+            if config['nfi'] == 'w2v':
+                # Generate word embeddings
+                w2v_model = Word2Vec(sentences=tokenized_corpus, vector_size=config['input_dim'], window=5, min_count=1, workers=4)
+                word_features, updated_vocab = [], []
+                for word in vocab:
+                    if word in w2v_model.wv:
+                        word_features.append(w2v_model.wv[word])
+                        updated_vocab.append(word)
+                    else:
+                        word_features.append(np.zeros(w2v_model.vector_size))  # Assign zero vector for missing words
+                word_features = torch.tensor(word_features, dtype=torch.float)
+                #vocab = updated_vocab
+                #word_to_index = {word: idx for idx, word in enumerate(vocab)}
+
+                # Generate document embeddings using Word2Vec-based averaging
+                doc_features = []
+                for text in tqdm(tokenized_corpus, desc="Extracting document embeddings"):
+                    word_embeddings = [w2v_model.wv[word] for word in text if word in w2v_model.wv]
+                    if len(word_embeddings) > 0:
+                        doc_embedding = np.mean(word_embeddings, axis=0)  # Average word embeddings
+                    else:
+                        doc_embedding = np.zeros(w2v_model.vector_size)  # Default to zero vector if no words are found 
+                    doc_features.append(torch.tensor(doc_embedding, dtype=torch.float))
+                doc_features = torch.stack(doc_features)  # Convert list of tensors to a single tensor
+                        
+            if config['nfi'] == 'random':
+                # Generate word embeddings
+                word_features = np.random.uniform(low=-1, high=1, size=(len(vocab), config['input_dim']))
+                word_features = torch.tensor(word_features, dtype=torch.float)
+                # Generate random document embeddings
+                doc_features = []
+                for _ in tqdm(all_texts_norm, desc="Generating random document embeddings"):
+                    doc_embedding = np.random.uniform(low=-1, high=1, size=(config['input_dim'],))
+                    doc_features.append(torch.tensor(doc_embedding, dtype=torch.float))
+                doc_features = torch.stack(doc_features)  # Convert list of tensors to a single tensor
 
 
-        # **** Create document-word edges
-        doc_word_edges = set()
-        doc_word_attr = {}
-        for doc_id, doc in enumerate(tqdm(X, desc="Extracting document-word edges")):
-            for word_idx in doc.nonzero()[1]:
-                word_node_id = len(all_texts) + word_idx
-                # Add edge: word -> document
-                edge = (word_node_id, doc_id)
-                if edge not in doc_word_edges:
-                    doc_word_edges.add(edge)
-                    doc_word_attr[edge] = X_tfidf[doc_id, word_idx]
-                # Add edge: document -> word
-                #reverse_edge = (doc_id, word_node_id)
-                #if reverse_edge not in doc_word_edges:
-                #    doc_word_edges.add(reverse_edge)
-                #    doc_word_attr[reverse_edge] = X_tfidf[doc_id, word_idx]
+            # **** Create document-word edges
+            doc_word_edges = set()
+            doc_word_attr = {}
+            for doc_id, doc in enumerate(tqdm(X, desc="Extracting document-word edges")):
+                for word_idx in doc.nonzero()[1]:
+                    word_node_id = len(all_texts) + word_idx
+                    # Add edge: word -> document
+                    edge = (word_node_id, doc_id)
+                    if edge not in doc_word_edges:
+                        doc_word_edges.add(edge)
+                        doc_word_attr[edge] = X_tfidf[doc_id, word_idx]
+                    # Add edge: document -> word
+                    #reverse_edge = (doc_id, word_node_id)
+                    #if reverse_edge not in doc_word_edges:
+                    #    doc_word_edges.add(reverse_edge)
+                    #    doc_word_attr[reverse_edge] = X_tfidf[doc_id, word_idx]
 
-        # Convert set to a sorted list (ensuring consistent order)
-        doc_word_edges = sorted(doc_word_edges)  # List of (source, target) tuples
-        doc_word_attr = [doc_word_attr[edge] for edge in doc_word_edges]  # Corresponding TF-IDF weights as a list
+            # Convert set to a sorted list (ensuring consistent order)
+            doc_word_edges = sorted(doc_word_edges)  # List of (source, target) tuples
+            doc_word_attr = [doc_word_attr[edge] for edge in doc_word_edges]  # Corresponding TF-IDF weights as a list
 
-        # *** Create word-word edges and edge attributes
-        word_word_edges = set()
-        word_word_attr = {}
-        word_freq = Counter()
-        co_occurrence_matrix = defaultdict(int)
-        total_pairs = 0
+            # *** Create word-word edges and edge attributes
+            word_word_edges = set()
+            word_word_attr = {}
+            word_freq = Counter()
+            co_occurrence_matrix = defaultdict(int)
+            total_pairs = 0
 
-        for doc in tqdm(tokenized_corpus, desc="Extracting word-word edges"):
-            for i in range(len(doc)):
-                window = doc[i:i + config['window_size'] + 1]
-                for word1, word2 in combinations(window, 2):
-                    if word1 in word_to_index and word2 in word_to_index:
-                        word1_id = len(all_texts) + word_to_index[word1]
-                        word2_id = len(all_texts) + word_to_index[word2]
-                        word_word_edges.add((word1_id, word2_id))
-                        co_occurrence_matrix[(word1, word2)] += 1
-                        #word_word_edges.add((word2_id, word1_id))
-                        #co_occurrence_matrix[(word2, word1)] += 1
+            for doc in tqdm(tokenized_corpus, desc="Extracting word-word edges"):
+                for i in range(len(doc)):
+                    window = doc[i:i + config['window_size'] + 1]
+                    for word1, word2 in combinations(window, 2):
+                        if word1 in word_to_index and word2 in word_to_index:
+                            word1_id = len(all_texts) + word_to_index[word1]
+                            word2_id = len(all_texts) + word_to_index[word2]
+                            word_word_edges.add((word1_id, word2_id))
+                            co_occurrence_matrix[(word1, word2)] += 1
+                            #word_word_edges.add((word2_id, word1_id))
+                            #co_occurrence_matrix[(word2, word1)] += 1
 
-                        #if config['graph_direction'] == 'undirected':
-                        #    word_word_edges.add((word2_id, word1_id))
-                        #    co_occurrence_matrix[(word2, word1)] += 1
-                        word_freq[word1] += 1
-                        word_freq[word2] += 1
-                        total_pairs += 1
+                            #if config['graph_direction'] == 'undirected':
+                            #    word_word_edges.add((word2_id, word1_id))
+                            #    co_occurrence_matrix[(word2, word1)] += 1
+                            word_freq[word1] += 1
+                            word_freq[word2] += 1
+                            total_pairs += 1
 
-        # Calculate PMI values
-        pmi_matrix = calculate_pmi(co_occurrence_matrix, word_freq, total_pairs)
+            # Calculate PMI values
+            pmi_matrix = calculate_pmi(co_occurrence_matrix, word_freq, total_pairs)
 
-        # Convert word-word edges and attributes to lists
-        word_word_edges = list(word_word_edges)
-        word_word_attr = [pmi_matrix[(vocab[word1_id - len(all_texts)], vocab[word2_id - len(all_texts)])] for (word1_id, word2_id) in word_word_edges]
+            # Convert word-word edges and attributes to lists
+            word_word_edges = list(word_word_edges)
+            word_word_attr = [pmi_matrix[(vocab[word1_id - len(all_texts)], vocab[word2_id - len(all_texts)])] for (word1_id, word2_id) in word_word_edges]
 
-        # Combine document and word features
-        node_features = torch.cat([doc_features, word_features], dim=0)
-        edge_attr = torch.tensor(doc_word_attr + word_word_attr, dtype=torch.float).view(-1, 1)
+            # Combine document and word features
+            node_features = torch.cat([doc_features, word_features], dim=0)
+            edge_attr = torch.tensor(doc_word_attr + word_word_attr, dtype=torch.float).view(-1, 1)
 
-        # Normalize edge attributes
-        edge_attr = min_max_normalize(edge_attr)
+            # Normalize edge attributes
+            edge_attr = min_max_normalize(edge_attr)
 
-        # Create node labels
-        node_labels = torch.tensor(all_labels + [-1] * len(vocab), dtype=torch.long)
+            # Create node labels
+            node_labels = torch.tensor(all_labels + [-1] * len(vocab), dtype=torch.long)
 
-        # Combine all edges
-        edges = torch.tensor(doc_word_edges + word_word_edges, dtype=torch.long).t().contiguous()
+            # Combine all edges
+            edges = torch.tensor(doc_word_edges + word_word_edges, dtype=torch.long).t().contiguous()
 
-        # Calculate graph metrics
-        #graph_metrics = calculate_graph_metrics(edges, node_features)
+            # Calculate graph metrics
+            #graph_metrics = calculate_graph_metrics(edges, node_features)
 
-        # Apply dimensionality reduction to train, val, and test data
-        if config['embed_reduction']:    
-            embedding_reduction = nn.Linear(768, config['reduce_dim_to']).to(device)
-            node_features = reduce_dimension_linear(node_features, embedding_reduction, device, batch_size=128)
+            # Apply dimensionality reduction to train, val, and test data
+            if config['embed_reduction']:    
+                #embedding_reduction = nn.Linear(768, config['reduce_dim_to']).to(device)
+                embedding_reduction = build_projector(input_dim=768, hidden_dim=512, output_dim=config['reduce_dim_to'], dropout=0.1, num_layers=1, use_norm=False, activation='gelu').to(device)
 
-        # Create directed and undirected edge indices
-        directed_edge_index = edges
-        undirected_edge_index = torch.cat([edges, edges.flip(0)], dim=1)  # Add reverse edges
+                node_features = reduce_dimension_linear(node_features, embedding_reduction, device, batch_size=128)
 
-        # Removes duplicate edges (CHECK)
-        #directed_edge_index = torch.unique(directed_edge_index, dim=1)  
-        #undirected_edge_index = torch.unique(undirected_edge_index, dim=1)  
+            # Create directed and undirected edge indices
+            directed_edge_index = edges
+            undirected_edge_index = torch.cat([edges, edges.flip(0)], dim=1)  # Add reverse edges
 
-        #print(len(doc_word_attr), len(word_word_attr), len(edge_attr))
-        #print(len(doc_word_edges), len(word_word_edges), edges.shape)
-        #print(undirected_edge_index.shape, directed_edge_index.shape)
+            # Removes duplicate edges (CHECK)
+            #directed_edge_index = torch.unique(directed_edge_index, dim=1)  
+            #undirected_edge_index = torch.unique(undirected_edge_index, dim=1)  
 
-        # Handle edge_attr for undirected edges
-        #if config['graph_direction'] == 'undirected':
-        #    edge_attr = torch.cat([edge_attr, edge_attr], dim=0)  # Duplicate edge_attr for reverse edges
+            #print(len(doc_word_attr), len(word_word_attr), len(edge_attr))
+            #print(len(doc_word_edges), len(word_word_edges), edges.shape)
+            #print(undirected_edge_index.shape, directed_edge_index.shape)
 
-        # Create masks for train, validation, and test sets
-        num_nodes = len(node_features)
-        train_mask = torch.zeros(num_nodes, dtype=torch.bool)
-        val_mask = torch.zeros(num_nodes, dtype=torch.bool)
-        test_mask = torch.zeros(num_nodes, dtype=torch.bool)
+            # Handle edge_attr for undirected edges
+            #if config['graph_direction'] == 'undirected':
+            #    edge_attr = torch.cat([edge_attr, edge_attr], dim=0)  # Duplicate edge_attr for reverse edges
 
-        train_mask[:len(train_set)] = True
-        val_mask[len(train_set):len(train_set) + len(val_set)] = True
-        test_mask[len(train_set) + len(val_set):len(train_set) + len(val_set) + len(test_set)] = True
+            # Create masks for train, validation, and test sets
+            num_nodes = len(node_features)
+            train_mask = torch.zeros(num_nodes, dtype=torch.bool)
+            val_mask = torch.zeros(num_nodes, dtype=torch.bool)
+            test_mask = torch.zeros(num_nodes, dtype=torch.bool)
 
-        num_docs = len(train_set) + len(val_set) + len(test_set)
+            train_mask[:len(train_set)] = True
+            val_mask[len(train_set):len(train_set) + len(val_set)] = True
+            test_mask[len(train_set) + len(val_set):len(train_set) + len(val_set) + len(test_set)] = True
 
-        # Create the PyG Data object
-        data = Data(
-            x = node_features,
-            #edge_index = edges,
-            directed_edge_index=directed_edge_index,
-            undirected_edge_index=undirected_edge_index,
-            edge_attr = edge_attr,
-            train_mask = train_mask,
-            val_mask = val_mask,
-            test_mask = test_mask,
-            #graph_metrics = graph_metrics,
-            y = node_labels,
-            num_docs = num_docs,
-            #vocab = vocab,
-            #word_to_index = word_to_index,
-            #index_to_word = index_to_word,
-            #all_texts_norm = all_texts_norm
+            num_docs = len(train_set) + len(val_set) + len(test_set)
+
+            # Create the PyG Data object
+            data = Data(
+                x = node_features,
+                #edge_index = edges,
+                directed_edge_index=directed_edge_index,
+                undirected_edge_index=undirected_edge_index,
+                edge_attr = edge_attr,
+                train_mask = train_mask,
+                val_mask = val_mask,
+                test_mask = test_mask,
+                #graph_metrics = graph_metrics,
+                y = node_labels,
+                num_docs = num_docs,
+                #vocab = vocab,
+                #word_to_index = word_to_index,
+                #index_to_word = index_to_word,
+                #all_texts_norm = all_texts_norm
+            )
+
+            # add/remove attr from Data object (based on the above config, this reduce the traning time)
+            if config['graph_direction'] == 'undirected':
+                data.edge_index = data.undirected_edge_index
+                if config['add_edge_attr']:
+                    data.edge_attr = torch.cat([data.edge_attr, data.edge_attr], dim=0)  # Duplicate edge_attr for reverse edges
+            else:
+                data.edge_index = data.directed_edge_index
+            del data.directed_edge_index
+            del data.undirected_edge_index
+
+            # Save the data object
+            #utils.save_data(data, file_name_data, path=output_dir, format_file='.pkl', compress=False)
+            utils.save_data(data, file_name_data, path=f'{output_dir}/{nfi_dir}/', format_file='.pkl', compress=False)
+            print("--- %s Graph Built Time: ---" % (time.time() - start_time))
+        else:
+            # Load the data object
+            #data = utils.load_data(file_name_data, path=output_dir, format_file='.pkl', compress=False)
+            data = utils.load_data(file_name_data, path=f'{output_dir}/{nfi_dir}/', format_file='.pkl', compress=False)
+
+            '''
+            # **************** TMP DELETE
+            out_p = f'/home/avaldez/projects/TrainingGNN/outputs/'
+            vocab, adj, node_labels, train_mask, val_mask, test_mask, train_size, test_size, val_size = load_corpus(out_p, config['dataset_name'])
+        
+            node_features = utils.load_data(
+                f'node_features_{config["dataset_name"]}',
+                path=out_p, 
+                format_file='.pkl', compress=False)
+            adj = normalize_adj(adj + sp.eye(adj.shape[0]))
+            edge_index, edge_weight = from_scipy_sparse_matrix(adj)
+            edge_weight = edge_weight.to(torch.float32).to(device)
+            edge_index = edge_index.to(torch.long).to(device)
+            data.train_mask = train_mask 
+            data.val_mask = val_mask
+            data.test_mask = test_mask
+            data.x = node_features
+            data.edge_index = edge_index
+            data.edge_attr = edge_weight
+            data.y = node_labels
+            '''
+            #print(data)
+        
+
+        #embedding_reduction = nn.Linear(768, 128).to(device)
+        #data.x = reduce_dimension_linear(data.x, embedding_reduction, device, , batch_size=128)
+        #utils.save_data(data, file_name_data, path=output_dir, format_file='.pkl', compress=False)
+        #return
+
+        for k, v in config.items():
+            mlflow.log_param(k, v)
+            
+        if config['add_graph_metric']:
+            data.x = torch.cat([data.x, data.graph_metrics], dim=-1)
+        else:
+            del data.graph_metrics
+
+        if not config['add_edge_attr']:
+            del data.edge_attr
+
+        del data.vocab
+
+        # Find isolated nodes
+        #nodes_with_edges = torch.unique(data.edge_index.flatten())
+        #all_nodes = torch.arange(data.num_nodes)
+        #mask = ~torch.isin(all_nodes, nodes_with_edges)  # Find nodes not in nodes_with_edges
+        #isolated_nodes = all_nodes[mask]  # Select isolated nodes
+        #print("isolated_nodes: ", isolated_nodes)
+
+        # move data object to devine
+        data = data.to(device)
+        print(data)
+
+        # Create NeighborLoader instances
+        train_nodes = torch.nonzero(data.train_mask, as_tuple=True)[0]  # Indices of train nodes
+        val_nodes = torch.nonzero(data.val_mask, as_tuple=True)[0]  # Indices of train nodes
+        test_nodes = torch.nonzero(data.test_mask, as_tuple=True)[0]  # Indices of train nodes
+        #print(train_nodes)
+        #print(val_nodes)
+        #print(test_nodes)
+
+        train_loader = NeighborLoader(
+            data,
+            num_neighbors=config['num_neighbors'], # Number of neighbors to sample at each layer
+            batch_size=config['batch_size'],       # Batch size
+            input_nodes=train_nodes, # also is valid to pass directly: data.train_mask
+            shuffle=True,
+            replace=False,
+            num_workers=2,
+            persistent_workers=False  # Caches samples for repeated training 
         )
 
-        # add/remove attr from Data object (based on the above config, this reduce the traning time)
-        if config['graph_direction'] == 'undirected':
-            data.edge_index = data.undirected_edge_index
-            if config['add_edge_attr']:
-                data.edge_attr = torch.cat([data.edge_attr, data.edge_attr], dim=0)  # Duplicate edge_attr for reverse edges
-        else:
-            data.edge_index = data.directed_edge_index
-        del data.directed_edge_index
-        del data.undirected_edge_index
+        val_loader = NeighborLoader(
+            data,
+            num_neighbors=config['num_neighbors'], 
+            batch_size=config['batch_size'],       
+            input_nodes=val_nodes,
+            shuffle=True,
+            replace=False,
+            num_workers=2,
+            persistent_workers=False  # Caches samples for repeated training         
+        )
 
-        # Save the data object
-        #utils.save_data(data, file_name_data, path=output_dir, format_file='.pkl', compress=False)
-        utils.save_data(data, file_name_data, path=f'{output_dir}/{nfi_dir}/', format_file='.pkl', compress=False)
-        print("--- %s Graph Built Time: ---" % (time.time() - start_time))
-    else:
-        # Load the data object
-        #data = utils.load_data(file_name_data, path=output_dir, format_file='.pkl', compress=False)
-        data = utils.load_data(file_name_data, path=f'{output_dir}/{nfi_dir}/', format_file='.pkl', compress=False)
+        test_loader = NeighborLoader(
+            data,
+            num_neighbors=config['num_neighbors'], 
+            batch_size=config['batch_size'],       
+            input_nodes=test_nodes,
+            shuffle=True,
+            replace=False,
+            num_workers=2,
+            persistent_workers=False  # Caches samples for repeated training 
+        )
 
-        '''
-        # **************** TMP DELETE
-        out_p = f'/home/avaldez/projects/TrainingGNN/outputs/'
-        vocab, adj, node_labels, train_mask, val_mask, test_mask, train_size, test_size, val_size = load_corpus(out_p, config['dataset_name'])
-    
-        node_features = utils.load_data(
-            f'node_features_{config["dataset_name"]}',
-            path=out_p, 
-            format_file='.pkl', compress=False)
-        adj = normalize_adj(adj + sp.eye(adj.shape[0]))
-        edge_index, edge_weight = from_scipy_sparse_matrix(adj)
-        edge_weight = edge_weight.to(torch.float32).to(device)
-        edge_index = edge_index.to(torch.long).to(device)
-        data.train_mask = train_mask 
-        data.val_mask = val_mask
-        data.test_mask = test_mask
-        data.x = node_features
-        data.edge_index = edge_index
-        data.edge_attr = edge_weight
-        data.y = node_labels
-        '''
-        #print(data)
-    
-
-    #embedding_reduction = nn.Linear(768, 128).to(device)
-    #data.x = reduce_dimension_linear(data.x, embedding_reduction, device, , batch_size=128)
-    #utils.save_data(data, file_name_data, path=output_dir, format_file='.pkl', compress=False)
-    #return
-
-
-    if config['add_graph_metric']:
-        data.x = torch.cat([data.x, data.graph_metrics], dim=-1)
-    else:
-        del data.graph_metrics
-
-    if not config['add_edge_attr']:
-        del data.edge_attr
-
-    del data.vocab
-
-    # Find isolated nodes
-    #nodes_with_edges = torch.unique(data.edge_index.flatten())
-    #all_nodes = torch.arange(data.num_nodes)
-    #mask = ~torch.isin(all_nodes, nodes_with_edges)  # Find nodes not in nodes_with_edges
-    #isolated_nodes = all_nodes[mask]  # Select isolated nodes
-    #print("isolated_nodes: ", isolated_nodes)
-
-    # move data object to devine
-    data = data.to(device)
-    print(data)
-
-    # Create NeighborLoader instances
-    train_nodes = torch.nonzero(data.train_mask, as_tuple=True)[0]  # Indices of train nodes
-    val_nodes = torch.nonzero(data.val_mask, as_tuple=True)[0]  # Indices of train nodes
-    test_nodes = torch.nonzero(data.test_mask, as_tuple=True)[0]  # Indices of train nodes
-    #print(train_nodes)
-    #print(val_nodes)
-    #print(test_nodes)
-
-    train_loader = NeighborLoader(
-        data,
-        num_neighbors=config['num_neighbors'], # Number of neighbors to sample at each layer
-        batch_size=config['batch_size'],       # Batch size
-        input_nodes=train_nodes, # also is valid to pass directly: data.train_mask
-        shuffle=True,
-        replace=False,
-        num_workers=2,
-        persistent_workers=False  # Caches samples for repeated training 
-    )
-
-    val_loader = NeighborLoader(
-        data,
-        num_neighbors=config['num_neighbors'], 
-        batch_size=config['batch_size'],       
-        input_nodes=val_nodes,
-        shuffle=True,
-        replace=False,
-        num_workers=2,
-        persistent_workers=False  # Caches samples for repeated training         
-    )
-
-    test_loader = NeighborLoader(
-        data,
-        num_neighbors=config['num_neighbors'], 
-        batch_size=config['batch_size'],       
-        input_nodes=test_nodes,
-        shuffle=True,
-        replace=False,
-        num_workers=2,
-        persistent_workers=False  # Caches samples for repeated training 
-    )
-
-    for batch in train_loader:
-        print(f"Batch nodes: {batch.n_id.size(0)}, Batch data: {batch}")
-        break
-    
-    # Initialize the model
-    input_dim = data.x.shape[1]
-    test_utils.set_random_seed(42)
-
-    model = GNN(
-        input_dim,
-        hidden_dim=config['hidden_dim'],
-        dense_hidden_dim=config['dense_hidden_dim'],
-        output_dim=config['output_dim'],
-        dropout=config['dropout'],
-        num_layers=config['num_layers'],
-        edge_attr=config['add_edge_attr'],
-        gnn_type=config['gnn_type'],
-        heads=config['heads'],
-        task='node',
-        directed=(config['graph_direction'] == 'directed'),
-    )
-    
-    model = model.to(device)
-    print(model)
-
-    # Training loop
-    optimizer = torch.optim.Adam(model.parameters(), lr=config['learnin_rate'], weight_decay=config['weight_decay'])
-    # Add learning rate scheduler
-    #scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=5, verbose=True)
-
-    criterion = torch.nn.CrossEntropyLoss()
-    early_stopper = EarlyStopper(patience=config['patience'], min_delta=0)
-
-    logger.info("Init GNN training!")
-    start_time = time.time()
-
-    best_test_acc, best_test_f1score, best_epoch = 0, 0, 0
-    for epoch in range(config['epochs']):
-        #with torch.cuda.amp.autocast():  # Use FP16 for faster computation
-        loss_train = train(model, train_loader, optimizer, criterion, device)
-        val_acc, val_f1_macro, val_loss = evaluate(model, val_loader, criterion, 'val', device)
-        
-        if epoch % 1 == 0:
-            test_acc, test_f1_macro, test_loss  = evaluate(model, test_loader, criterion, 'test', device)
-            print(f'Ep {epoch + 1}, Loss Val: {val_loss:.4f}, Loss Test: {test_loss:.4f}, '
-            f'Val Acc: {val_acc:.4f}, Val F1s: {val_f1_macro:.4f}, Test Acc: {test_acc:.4f}, Test F1s: {test_f1_macro:.4f}')
-        else:
-            print(f'Ep {epoch + 1}, Loss Val: {val_loss:.4f}, Val Acc: {val_acc:.4f}, Val F1s: {val_f1_macro:.4f}')
-            
-        # Get the current learning rate
-        current_lr = optimizer.param_groups[0]['lr']
-
-        #print("preds_test: ", sorted(Counter(preds_test).items()))
-        #print("label_test: ", sorted(Counter(labels_test).items()))
-        
-        #scheduler.step(val_loss)  # Update learning rate
-        if early_stopper.early_stop(val_loss):
-            print('Early stopping due to no improvement!')
+        for batch in train_loader:
+            print(f"Batch nodes: {batch.n_id.size(0)}, Batch data: {batch}")
             break
-
-        torch.cuda.empty_cache()
-    
-    logger.info("Done GNN training!")
-    print("--- %s Graph Training Time ---" % (time.time() - start_time))
-
-    # Evaluate on test set
-    test_acc, test_f1_macro, test_loss = evaluate(model, test_loader, criterion, 'test', device)
-    print()
-    print(f'Test Accuracy: {test_acc:.4f}')
-    print(f'Test F1Score: {test_f1_macro:.4f}')
-    print(f'Test Loss: {test_loss:.4f}')
-
-    model_save_path = f"{output_dir}/models/gnn_model_{nfi_dir}_{file_name_data}.pth"
-    
-    # save model state dict (weights, layers, etc)
-    model_checkpoint = {
-        'model_state_dict': model.state_dict(),
-        'input_dim': config['input_dim'],
-        'hidden_dim': config['hidden_dim'],
-        'dense_hidden_dim': config['dense_hidden_dim'],
-        'output_dim': config['output_dim'],
-        'dropout': config['dropout'],
-        'num_layers': config['num_layers'],
-        'edge_attr': config['add_edge_attr'],
-        'gnn_type': config['gnn_type'],
-        'heads': config['heads'],
-        'task': 'node',
-        'graph_direction': config['graph_direction'],
-    }
-    torch.save(model_checkpoint, model_save_path)
-
-    # save entire model (this save hyperparam, architecture and model params)
-    #torch.save(model, model_save_path)
-    
-    print(f"Model saved at: {model_save_path}")
-
-    return
-
-    # Extract embeddings for the test set nodes
-    test_embeddings, test_node_indices = extract_gnn_embeddings(model, data, test_loader)
-
-    # Plot the embeddings at each step (input features, after 1st layer, and after 2nd layer)
-    steps = ['Input Features', 'After 1st Layer', 'After 2nd Layer']
-    for i, embeddings in enumerate(test_embeddings):
-        # Combine embeddings from all batches to create a single set
-        combined_embeddings = np.vstack(embeddings)
-        test_nodes_combined = np.concatenate(test_node_indices)
-
-        # Use PCA to reduce the dimensions for visualization
-        reduced_embeddings = PCA(n_components=2).fit_transform(combined_embeddings)
         
-        # Plot the reduced embeddings
-        plt.figure(figsize=(8, 6))
-        plt.scatter(reduced_embeddings[:, 0], reduced_embeddings[:, 1], 
-                    c=data.y[test_nodes_combined].cpu().numpy(), cmap='viridis')
-        plt.colorbar()
-        plt.title(f'{steps[i]} Embeddings of Test Set')
-        plt.show()
-        plt.savefig(f'test_emb_{i}.png')
+        # Initialize the model
+        input_dim = data.x.shape[1]
+        test_utils.set_random_seed(42)
+
+        model = GNN(
+            input_dim,
+            hidden_dim=config['hidden_dim'],
+            dense_hidden_dim=config['dense_hidden_dim'],
+            output_dim=config['output_dim'],
+            dropout=config['dropout'],
+            num_layers=config['num_layers'],
+            edge_attr=config['add_edge_attr'],
+            gnn_type=config['gnn_type'],
+            heads=config['heads'],
+            directed=(config['graph_direction'] == 'directed'),
+            norm_type=config['norm_type'], 
+            post_mp_layers=config['post_mp_layers'],   
+        )
+
+        mlflow.log_param('model_params', str(model))
+        model = model.to(device)
+        print(model)
+
+        # Training loop
+        optimizer = torch.optim.Adam(model.parameters(), lr=config['learnin_rate'], weight_decay=config['weight_decay'])
+        # Add learning rate scheduler
+        #scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=5, verbose=True)
+
+        criterion = torch.nn.CrossEntropyLoss()
+        early_stopper = EarlyStopper(patience=config['patience'], min_delta=0)
+
+        logger.info("Init GNN training!")
+        start_time = time.time()
+
+        best_test_acc_score = 0
+        best_test_f1_score = 0
+        stop_epoch = 0
+        for epoch in range(config['epochs']):
+            #with torch.cuda.amp.autocast():  # Use FP16 for faster computation
+            loss_train = train(model, train_loader, optimizer, criterion, device)
+            val_acc, val_f1_macro, val_loss, _, _ = evaluate(model, val_loader, criterion, 'val', device)
+            
+            if epoch % 1 == 0:
+                test_acc, test_f1_macro, test_loss, _, _  = evaluate(model, test_loader, criterion, 'test', device)
+                print(f'Ep {epoch + 1}, Loss Val: {val_loss:.4f}, Loss Test: {test_loss:.4f}, '
+                f'Val Acc: {val_acc:.4f}, Val F1s: {val_f1_macro:.4f}, Test Acc: {test_acc:.4f}, Test F1s: {test_f1_macro:.4f}')
+            else:
+                print(f'Ep {epoch + 1}, Loss Val: {val_loss:.4f}, Val Acc: {val_acc:.4f}, Val F1s: {val_f1_macro:.4f}')
+                
+            # Get the current learning rate
+            current_lr = optimizer.param_groups[0]['lr']
+
+            #print("preds_test: ", sorted(Counter(preds_test).items()))
+            #print("label_test: ", sorted(Counter(labels_test).items()))
+            
+            mlflow.log_metric(key=f"F1Score-val", value=float(val_f1_macro), step=epoch)
+            mlflow.log_metric(key=f"Accuracy-val", value=float(val_acc), step=epoch)
+            mlflow.log_metric(key=f"Loss-val", value=float(val_loss), step=epoch)
+            mlflow.log_metric(key=f"F1Score-test", value=float(test_f1_macro), step=epoch)
+            mlflow.log_metric(key=f"Accuracy-test", value=float(test_acc), step=epoch)
+            mlflow.log_metric(key=f"Loss-test", value=float(test_loss), step=epoch)
+
+            if test_acc > best_test_acc_score:
+                best_test_acc_score = test_acc
+            if test_f1_macro > best_test_f1_score:
+                best_test_f1_score = test_f1_macro
+
+            stop_epoch = epoch
+            #scheduler.step(val_loss)  # Update learning rate
+            if early_stopper.early_stop(val_loss):
+                print('Early stopping due to no improvement!')
+                break
+
+            torch.cuda.empty_cache()
+        
+        logger.info("Done GNN training!")
+        print("--- %s Graph Training Time ---" % (time.time() - start_time))
+
+        # Evaluate on test set
+        test_acc, test_f1_macro, test_loss, preds_test, labels_test = evaluate(model, test_loader, criterion, 'test', device)
+        print()
+        print(f'Test Accuracy: {test_acc:.4f}')
+        print(f'Test F1Score: {test_f1_macro:.4f}')
+        print(f'Test Loss: {test_loss:.4f}')
+
+        print("preds_test:  ", sorted(Counter(preds_test).items()))
+        print("labels_test: ", sorted(Counter(labels_test).items()))
+        cm = confusion_matrix(preds_test, labels_test)
+        print(cm)
+
+        log_conf_matrix(preds_test, labels_test)
+        mlflow.log_metric(key=f"num_epochs", value=int(config['epochs']))
+        mlflow.log_metric(key=f"stop_epoch", value=int(stop_epoch))
+        mlflow.log_metric(key=f"Final-F1Macro-val", value=float(val_f1_macro))
+        mlflow.log_metric(key=f"Final-Accuracy-test", value=float(val_acc))
+        mlflow.log_metric(key=f"Final-Loss-test", value=float(val_loss))
+        mlflow.log_metric(key=f"Final-F1Macro-test", value=float(test_f1_macro))
+        mlflow.log_metric(key=f"Final-Accuracy-test", value=float(test_acc))
+        mlflow.log_metric(key=f"Final-Loss-test", value=float(test_loss))
+        mlflow.log_metric(key=f"Best-Accuracy-test", value=float(best_test_acc_score))
+        mlflow.log_metric(key=f"Best-F1Macro-test", value=float(best_test_f1_score))
+
+        model_save_path = f"{output_dir}/models/gnn_model_{nfi_dir}_{file_name_data}.pth"
+        
+        # save model state dict (weights, layers, etc)
+        model_checkpoint = {
+            'model_state_dict': model.state_dict(),
+            'input_dim': config['input_dim'],
+            'hidden_dim': config['hidden_dim'],
+            'dense_hidden_dim': config['dense_hidden_dim'],
+            'output_dim': config['output_dim'],
+            'dropout': config['dropout'],
+            'num_layers': config['num_layers'],
+            'edge_attr': config['add_edge_attr'],
+            'gnn_type': config['gnn_type'],
+            'heads': config['heads'],
+            'task': 'node',
+            'graph_direction': config['graph_direction'],
+        }
+        torch.save(model_checkpoint, model_save_path)
+
+        # save entire model (this save hyperparam, architecture and model params)
+        #torch.save(model, model_save_path)
+        
+        print(f"Model saved at: {model_save_path}")
+
+        return
+
+        # Extract embeddings for the test set nodes
+        test_embeddings, test_node_indices = extract_gnn_embeddings(model, data, test_loader)
+
+        # Plot the embeddings at each step (input features, after 1st layer, and after 2nd layer)
+        steps = ['Input Features', 'After 1st Layer', 'After 2nd Layer']
+        for i, embeddings in enumerate(test_embeddings):
+            # Combine embeddings from all batches to create a single set
+            combined_embeddings = np.vstack(embeddings)
+            test_nodes_combined = np.concatenate(test_node_indices)
+
+            # Use PCA to reduce the dimensions for visualization
+            reduced_embeddings = PCA(n_components=2).fit_transform(combined_embeddings)
+            
+            # Plot the reduced embeddings
+            plt.figure(figsize=(8, 6))
+            plt.scatter(reduced_embeddings[:, 0], reduced_embeddings[:, 1], 
+                        c=data.y[test_nodes_combined].cpu().numpy(), cmap='viridis')
+            plt.colorbar()
+            plt.title(f'{steps[i]} Embeddings of Test Set')
+            plt.show()
+            plt.savefig(f'test_emb_{i}.png')
 
 
 
