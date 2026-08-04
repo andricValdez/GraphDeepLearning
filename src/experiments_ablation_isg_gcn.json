@@ -1,0 +1,128 @@
+{
+  "_comment": "OFAT ablation study for GCNConv on ISG graphs. GCNConv does not support edge_attr or multi-head attention; both are locked. build_graph=false.",
+
+  "defaults": {
+    "mlflow_exp_name": "Ablation-Study-ISG-GCNConv",
+    "gnn_type": "GCNConv",
+    "build_graph": false,
+    "graph_type": "undirected",
+    "dataset_name": "autext23",
+    "cut_off_dataset": "100_100_100",
+    "cuda_num": 1,
+    "edge_attr": false,
+    "heads_gnn": 1,
+    "reduce_dim_emb": false,
+    "add_pos_feat": true,
+    "add_domain_feat": false,
+    "project_after_concat": false,
+    "reduced_dim": 256,
+    "balance_dataset": true,
+    "max_features": 20000,
+    "min_df": 3,
+    "max_df": 1.0,
+    "stop_words": false,
+    "special_chars": false,
+    "patience": 10,
+    "hidden_gnn_dim": 300,
+    "dense_hidden_gnn_dim": 64,
+    "num_gnn_layers": 2,
+    "dropout": 0.5,
+    "lr": 0.00001,
+    "norm_type": "batchnorm",
+    "post_mp_layers": 2,
+    "pooling_type": "mean",
+    "lang_model_name": "microsoft/deberta-v3-base",
+    "leave_out_sources": true,
+    "use_token_distance_attn": false,
+    "use_global_pooling": false
+  },
+
+  "experiments": [
+
+    {
+      "_comment": "── Baseline ─────────────────────────────────────────────────────────────────",
+      "name": "gcn_base",
+      "_description": "GCNConv baseline: 2L 1H mean batchnorm hid300 d64 dr0.5 lr1e-5 2mp DeBERTa lodo (no edge_attr)"
+    },
+
+    {
+      "_comment": "── hidden_gnn_dim ───────────────────────────────────────────────────────────",
+      "name": "gcn_hid128",
+      "hidden_gnn_dim": 128
+    },
+    {
+      "name": "gcn_hid500",
+      "hidden_gnn_dim": 500
+    },
+
+    {
+      "_comment": "── dense_hidden_gnn_dim ─────────────────────────────────────────────────────",
+      "name": "gcn_dense128",
+      "dense_hidden_gnn_dim": 128
+    },
+
+    {
+      "_comment": "── num_gnn_layers ───────────────────────────────────────────────────────────",
+      "name": "gcn_1L",
+      "num_gnn_layers": 1
+    },
+    {
+      "name": "gcn_3L",
+      "num_gnn_layers": 3
+    },
+    {
+      "name": "gcn_4L",
+      "num_gnn_layers": 4
+    },
+
+    {
+      "_comment": "── dropout ──────────────────────────────────────────────────────────────────",
+      "name": "gcn_dr025",
+      "dropout": 0.25
+    },
+    {
+      "name": "gcn_dr075",
+      "dropout": 0.75
+    },
+
+    {
+      "_comment": "── learning rate ────────────────────────────────────────────────────────────",
+      "name": "gcn_lr1e4",
+      "lr": 0.0001
+    },
+
+    {
+      "_comment": "── norm_type ────────────────────────────────────────────────────────────────",
+      "name": "gcn_ln",
+      "norm_type": "layernorm"
+    },
+
+    {
+      "_comment": "── post_mp_layers ───────────────────────────────────────────────────────────",
+      "name": "gcn_mp1",
+      "post_mp_layers": 1
+    },
+    {
+      "name": "gcn_mp3",
+      "post_mp_layers": 3
+    },
+
+    {
+      "_comment": "── pooling_type ─────────────────────────────────────────────────────────────",
+      "name": "gcn_attn",
+      "pooling_type": "attention"
+    },
+
+    {
+      "_comment": "── leave_out_sources ────────────────────────────────────────────────────────",
+      "name": "gcn_lodo_off",
+      "leave_out_sources": false
+    },
+    {
+      "_comment": "── use_token_distance_attn ────────────────────────────────────────────────────────",
+      "name": "trans_use_token_distance",
+      "use_token_distance_attn": true
+    }
+
+  ]
+}

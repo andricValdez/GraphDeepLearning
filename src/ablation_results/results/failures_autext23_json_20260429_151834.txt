@@ -1,0 +1,240 @@
+
+================================================================================
+Experiment: gcn_base
+Error: Unknown gnn_type: GCNConv
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 325, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 190, in _run_single_experiment
+    gtn_main_cached(**config, use_cache=True, force_rebuild=force_rebuild)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph_raw_GTN.py", line 2754, in main_cached
+    raise ValueError(f"Unknown gnn_type: {gnn_type}")
+ValueError: Unknown gnn_type: GCNConv
+
+
+================================================================================
+Experiment: gcn_hid128
+Error: Unknown gnn_type: GCNConv
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 325, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 190, in _run_single_experiment
+    gtn_main_cached(**config, use_cache=True, force_rebuild=force_rebuild)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph_raw_GTN.py", line 2754, in main_cached
+    raise ValueError(f"Unknown gnn_type: {gnn_type}")
+ValueError: Unknown gnn_type: GCNConv
+
+
+================================================================================
+Experiment: gcn_hid500
+Error: Unknown gnn_type: GCNConv
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 325, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 190, in _run_single_experiment
+    gtn_main_cached(**config, use_cache=True, force_rebuild=force_rebuild)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph_raw_GTN.py", line 2754, in main_cached
+    raise ValueError(f"Unknown gnn_type: {gnn_type}")
+ValueError: Unknown gnn_type: GCNConv
+
+
+================================================================================
+Experiment: gcn_dense128
+Error: Unknown gnn_type: GCNConv
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 325, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 190, in _run_single_experiment
+    gtn_main_cached(**config, use_cache=True, force_rebuild=force_rebuild)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph_raw_GTN.py", line 2754, in main_cached
+    raise ValueError(f"Unknown gnn_type: {gnn_type}")
+ValueError: Unknown gnn_type: GCNConv
+
+
+================================================================================
+Experiment: gcn_1L
+Error: Unknown gnn_type: GCNConv
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 325, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 190, in _run_single_experiment
+    gtn_main_cached(**config, use_cache=True, force_rebuild=force_rebuild)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph_raw_GTN.py", line 2754, in main_cached
+    raise ValueError(f"Unknown gnn_type: {gnn_type}")
+ValueError: Unknown gnn_type: GCNConv
+
+
+================================================================================
+Experiment: gcn_3L
+Error: Unknown gnn_type: GCNConv
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 325, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 190, in _run_single_experiment
+    gtn_main_cached(**config, use_cache=True, force_rebuild=force_rebuild)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph_raw_GTN.py", line 2754, in main_cached
+    raise ValueError(f"Unknown gnn_type: {gnn_type}")
+ValueError: Unknown gnn_type: GCNConv
+
+
+================================================================================
+Experiment: gcn_4L
+Error: Unknown gnn_type: GCNConv
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 325, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 190, in _run_single_experiment
+    gtn_main_cached(**config, use_cache=True, force_rebuild=force_rebuild)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph_raw_GTN.py", line 2754, in main_cached
+    raise ValueError(f"Unknown gnn_type: {gnn_type}")
+ValueError: Unknown gnn_type: GCNConv
+
+
+================================================================================
+Experiment: gcn_dr025
+Error: Unknown gnn_type: GCNConv
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 325, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 190, in _run_single_experiment
+    gtn_main_cached(**config, use_cache=True, force_rebuild=force_rebuild)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph_raw_GTN.py", line 2754, in main_cached
+    raise ValueError(f"Unknown gnn_type: {gnn_type}")
+ValueError: Unknown gnn_type: GCNConv
+
+
+================================================================================
+Experiment: gcn_dr075
+Error: Unknown gnn_type: GCNConv
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 325, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 190, in _run_single_experiment
+    gtn_main_cached(**config, use_cache=True, force_rebuild=force_rebuild)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph_raw_GTN.py", line 2754, in main_cached
+    else:
+ValueError: Unknown gnn_type: GCNConv
+
+
+================================================================================
+Experiment: gcn_lr1e4
+Error: Unknown gnn_type: GCNConv
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 325, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 190, in _run_single_experiment
+    gtn_main_cached(**config, use_cache=True, force_rebuild=force_rebuild)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph_raw_GTN.py", line 2754, in main_cached
+    print("🔥🆕 Enhanced Hybrid-ISG-GTN (+ Sentence-Aware + Dep Frequency)")
+ValueError: Unknown gnn_type: GCNConv
+
+
+================================================================================
+Experiment: gcn_ln
+Error: Unknown gnn_type: GCNConv
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 325, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 190, in _run_single_experiment
+    gtn_main_cached(**config, use_cache=True, force_rebuild=force_rebuild)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph_raw_GTN.py", line 2754, in main_cached
+    print("🔥🆕 Enhanced Hybrid-ISG-GTN (+ Sentence-Aware + Dep Frequency)")
+ValueError: Unknown gnn_type: GCNConv
+
+
+================================================================================
+Experiment: gcn_mp1
+Error: Unknown gnn_type: GCNConv
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 325, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 190, in _run_single_experiment
+    gtn_main_cached(**config, use_cache=True, force_rebuild=force_rebuild)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph_raw_GTN.py", line 2754, in main_cached
+    print("🔥🆕 Enhanced Hybrid-ISG-GTN (+ Sentence-Aware + Dep Frequency)")
+ValueError: Unknown gnn_type: GCNConv
+
+
+================================================================================
+Experiment: gcn_mp3
+Error: Unknown gnn_type: GCNConv
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 325, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 190, in _run_single_experiment
+    gtn_main_cached(**config, use_cache=True, force_rebuild=force_rebuild)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph_raw_GTN.py", line 2754, in main_cached
+    print("🔥🆕 Enhanced Hybrid-ISG-GTN (+ Sentence-Aware + Dep Frequency)")
+ValueError: Unknown gnn_type: GCNConv
+
+
+================================================================================
+Experiment: gcn_attn
+Error: Unknown gnn_type: GCNConv
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 325, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 190, in _run_single_experiment
+    gtn_main_cached(**config, use_cache=True, force_rebuild=force_rebuild)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph_raw_GTN.py", line 2754, in main_cached
+    print("🔥🆕 Enhanced Hybrid-ISG-GTN (+ Sentence-Aware + Dep Frequency)")
+ValueError: Unknown gnn_type: GCNConv
+
+
+================================================================================
+Experiment: gcn_lodo_off
+Error: Unknown gnn_type: GCNConv
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 325, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 190, in _run_single_experiment
+    gtn_main_cached(**config, use_cache=True, force_rebuild=force_rebuild)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph_raw_GTN.py", line 2754, in main_cached
+    print("🔥🆕 Enhanced Hybrid-ISG-GTN (+ Sentence-Aware + Dep Frequency)")
+ValueError: Unknown gnn_type: GCNConv
+
+
+================================================================================
+Experiment: trans_use_token_distance
+Error: Unknown gnn_type: GCNConv
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 325, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 190, in _run_single_experiment
+    gtn_main_cached(**config, use_cache=True, force_rebuild=force_rebuild)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph_raw_GTN.py", line 2754, in main_cached
+    print("🔥🆕 Enhanced Hybrid-ISG-GTN (+ Sentence-Aware + Dep Frequency)")
+ValueError: Unknown gnn_type: GCNConv
+

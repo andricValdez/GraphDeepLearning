@@ -1,0 +1,40 @@
+
+================================================================================
+Experiment: hybrid_1L
+Error: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/autext23/100_100_100/train_metadata.pt'
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 343, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 208, in _run_single_experiment
+    gtn_main_cached(**config, use_cache=True, force_rebuild=force_rebuild)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph_raw_GTN.py", line 2546, in main_cached
+    train_meta = cache.load('metadata', 'train')
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph_raw_GTN.py", line 1954, in load
+    data = torch.load(path)
+  File "/home/avaldez/envs/gnn/lib/python3.10/site-packages/torch/serialization.py", line 997, in load
+    with _open_file_like(f, 'rb') as opened_file:
+  File "/home/avaldez/envs/gnn/lib/python3.10/site-packages/torch/serialization.py", line 444, in _open_file_like
+    return _open_file(name_or_buffer, mode)
+  File "/home/avaldez/envs/gnn/lib/python3.10/site-packages/torch/serialization.py", line 425, in __init__
+    super().__init__(open(name, mode))
+FileNotFoundError: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/autext23/100_100_100/train_metadata.pt'
+
+
+================================================================================
+Experiment: hybrid_3L
+Error: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/autext23/100_100_100/train_graphs.pkl'
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 343, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 208, in _run_single_experiment
+    gtn_main_cached(**config, use_cache=True, force_rebuild=force_rebuild)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph_raw_GTN.py", line 2530, in main_cached
+    cache.save_graphs(graph_train, 'train')
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph_raw_GTN.py", line 1960, in save_graphs
+    with open(path, 'wb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/autext23/100_100_100/train_graphs.pkl'
+

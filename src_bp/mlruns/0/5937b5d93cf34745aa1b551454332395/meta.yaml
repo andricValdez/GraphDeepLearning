@@ -1,0 +1,15 @@
+artifact_uri: mlflow-artifacts:/0/5937b5d93cf34745aa1b551454332395/artifacts
+end_time: 1747341107414
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 5937b5d93cf34745aa1b551454332395
+run_name: /home/avaldez/projects/GraphDeepLearning/outputs/finetuned_hf_models/deberta-v3-base-finetuned-autext24
+run_uuid: 5937b5d93cf34745aa1b551454332395
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1747341102381
+status: 3
+tags: []
+user_id: avaldez

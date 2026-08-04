@@ -1,0 +1,151 @@
+{
+  "_comment": "OFAT ablation study for Hybrid-ISG-GTN on ISG graphs. Baseline norm is layernorm (Hybrid default); variation uses batchnorm. build_graph=false.",
+
+  "defaults": {
+    "mlflow_exp_name": "Ablation-Study-ISG-HybridISG",
+    "gnn_type": "Hybrid-ISG-GTN",
+    "build_graph": false,
+    "graph_type": "undirected",
+    "dataset_name": "autext23",
+    "cut_off_dataset": "100_100_100",
+    "cuda_num": 1,
+    "edge_attr": true,
+    "reduce_dim_emb": false,
+    "add_pos_feat": true,
+    "add_domain_feat": false,
+    "project_after_concat": false,
+    "reduced_dim": 256,
+    "balance_dataset": false,
+    "max_features": 20000,
+    "min_df": 3,
+    "max_df": 1.0,
+    "stop_words": false,
+    "special_chars": false,
+    "patience": 10,
+    "hidden_gnn_dim": 300,
+    "dense_hidden_gnn_dim": 64,
+    "num_gnn_layers": 2,
+    "heads_gnn": 2,
+    "dropout": 0.5,
+    "lr": 0.00001,
+    "norm_type": "layernorm",
+    "post_mp_layers": 2,
+    "pooling_type": "mean",
+    "lang_model_name": "microsoft/deberta-v3-base",
+    "leave_out_sources": true,
+    "use_token_distance_attn": true,
+    "use_global_pooling": false,
+    "use_dep_frequency": true,     
+    "use_sentence_aware": true
+  },
+
+  "experiments": [
+
+    {
+      "_comment": "── Baseline ─────────────────────────────────────────────────────────────────",
+      "name": "hybrid_base",
+      "_description": "Hybrid-ISG-GTN baseline: 2L 2H mean layernorm hid300 d64 dr0.5 lr1e-5 2mp DeBERTa lodo token-dist"
+    },
+
+    {
+      "_comment": "── hidden_gnn_dim ───────────────────────────────────────────────────────────",
+      "name": "hybrid_hid128",
+      "hidden_gnn_dim": 128
+    },
+    {
+      "name": "hybrid_hid500",
+      "hidden_gnn_dim": 500
+    },
+
+    {
+      "_comment": "── dense_hidden_gnn_dim ─────────────────────────────────────────────────────",
+      "name": "hybrid_dense128",
+      "dense_hidden_gnn_dim": 128
+    },
+
+    {
+      "_comment": "── num_gnn_layers ───────────────────────────────────────────────────────────",
+      "name": "hybrid_1L",
+      "num_gnn_layers": 1
+    },
+    {
+      "name": "hybrid_3L",
+      "num_gnn_layers": 4
+    },
+    {
+      "name": "hybrid_4L",
+      "num_gnn_layers": 8
+    },
+
+    {
+      "_comment": "── heads_gnn ────────────────────────────────────────────────────────────────",
+      "name": "hybrid_1H",
+      "heads_gnn": 1
+    },
+    {
+      "name": "hybrid_3H",
+      "heads_gnn": 3
+    },
+    {
+      "name": "hybrid_4H",
+      "heads_gnn": 4
+    },
+
+    {
+      "_comment": "── dropout ──────────────────────────────────────────────────────────────────",
+      "name": "hybrid_dr025",
+      "dropout": 0.25
+    },
+    {
+      "name": "hybrid_dr075",
+      "dropout": 0.75
+    },
+
+    {
+      "_comment": "── learning rate ────────────────────────────────────────────────────────────",
+      "name": "hybrid_lr1e4",
+      "lr": 0.0001
+    },
+
+    {
+      "_comment": "── norm_type (layernorm is the Hybrid baseline; batchnorm is the variation) ──",
+      "name": "hybrid_bn",
+      "norm_type": "batchnorm"
+    },
+
+    {
+      "_comment": "── post_mp_layers ───────────────────────────────────────────────────────────",
+      "name": "hybrid_mp1",
+      "post_mp_layers": 1
+    },
+    {
+      "name": "hybrid_mp3",
+      "post_mp_layers": 3
+    },
+
+    {
+      "_comment": "── pooling_type ─────────────────────────────────────────────────────────────",
+      "name": "hybrid_attn",
+      "pooling_type": "attention"
+    },
+
+    {
+      "_comment": "── use_token_distance_attn ──────────────────────────────────────────────────",
+      "name": "hybrid_no_tokdist",
+      "use_token_distance_attn": false
+    },
+
+
+    {
+      "_comment": "── leave_out_sources ────────────────────────────────────────────────────────",
+      "name": "hybrid_lodo_off",
+      "leave_out_sources": false
+    },
+    {
+      "_comment": "── use_token_distance_attn ────────────────────────────────────────────────────────",
+      "name": "trans_use_token_distance",
+      "use_token_distance_attn": true
+    }
+
+  ]
+}

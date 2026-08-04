@@ -127,17 +127,22 @@ def read_dataset(dataset_name, print_info=True):
             print("autext_test_set: ", autext_test_set.info())
             print(autext_train_set['model'].value_counts())
             print(autext_val_set['model'].value_counts())
+
+            # Model distribution for each source
+            print("Model distribution per source in Train set:\n", autext_train_set["source"].value_counts())
+            print("Model distribution per source in Validation set:\n", autext_val_set["source"].value_counts())
+
         
         return autext_train_set, autext_val_set, autext_test_set
 
 
     # ****************************** READ DATASET AUTEXT 2023
-    if dataset_name in ['autext23', 'autext23_s2']:
+    if dataset_name in ['autext23', 'autext23_s2', 'autext_s2']:
         
         #dataset_name = 'autext23' # autext23, autext23_s2
         if dataset_name == 'autext23': # subtask1, subtask2
             subtask = 'subtask1' 
-        if dataset_name == 'autext23_s2':
+        if dataset_name in ['autext23_s2', 'autext_s2']:
             subtask = 'subtask2' #
         
         autext_train_set = utils.read_csv(file_path=f'{utils.DATASET_DIR}autext2023/{subtask}/train_set.csv') 
@@ -407,5 +412,4 @@ def approximate_clustering_coefficient(edges, num_nodes, k=100):
         clustering_coeff_tensor[node] = value
 
     return clustering_coeff_tensor
-
 

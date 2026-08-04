@@ -1,0 +1,78 @@
+
+================================================================================
+Experiment: Q0_baseline
+Error: main() got an unexpected keyword argument 'description'
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 96, in run_study
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 151, in _run_single_experiment
+    gtn_main(**config)
+TypeError: main() got an unexpected keyword argument 'description'
+
+
+================================================================================
+Experiment: Q1_vanilla_edge_concat
+Error: main() got an unexpected keyword argument 'description'
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 96, in run_study
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 151, in _run_single_experiment
+    gtn_main(**config)
+TypeError: main() got an unexpected keyword argument 'description'
+
+
+================================================================================
+Experiment: Q2_isg_basic
+Error: main() got an unexpected keyword argument 'description'
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 96, in run_study
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 151, in _run_single_experiment
+    gtn_main(**config)
+TypeError: main() got an unexpected keyword argument 'description'
+
+
+================================================================================
+Experiment: Q3_isg_full
+Error: main() got an unexpected keyword argument 'description'
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 96, in run_study
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 151, in _run_single_experiment
+    gtn_main(**config)
+TypeError: main() got an unexpected keyword argument 'description'
+
+
+================================================================================
+Experiment: Q4_hybrid_basic
+Error: main() got an unexpected keyword argument 'description'
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 96, in run_study
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 151, in _run_single_experiment
+    gtn_main(**config)
+TypeError: main() got an unexpected keyword argument 'description'
+
+
+================================================================================
+Experiment: Q5_hybrid_full
+Error: main() got an unexpected keyword argument 'description'
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 96, in run_study
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 151, in _run_single_experiment
+    gtn_main(**config)
+TypeError: main() got an unexpected keyword argument 'description'
+

@@ -1,0 +1,142 @@
+{
+  "_comment": "OFAT ablation study for GATConv on ISG graphs. build_graph=false: graphs already built, only GNN retraining.",
+
+  "defaults": {
+    "mlflow_exp_name": "Ablation-Study-ISG-GATConv",
+    "gnn_type": "GATConv",
+    "build_graph": false,
+    "graph_type": "undirected",
+    "dataset_name": "autext23",
+    "cut_off_dataset": "100_100_100",
+    "cuda_num": 0,
+    "edge_attr": true,
+    "reduce_dim_emb": false,
+    "add_pos_feat": true,
+    "add_domain_feat": false,
+    "project_after_concat": false,
+    "reduced_dim": 256,
+    "balance_dataset": true,
+    "max_features": 20000,
+    "min_df": 3,
+    "max_df": 1.0,
+    "stop_words": false,
+    "special_chars": false,
+    "patience": 10,
+    "hidden_gnn_dim": 300,
+    "dense_hidden_gnn_dim": 64,
+    "num_gnn_layers": 2,
+    "heads_gnn": 2,
+    "dropout": 0.5,
+    "lr": 0.00001,
+    "norm_type": "batchnorm",
+    "post_mp_layers": 2,
+    "pooling_type": "mean",
+    "lang_model_name": "microsoft/deberta-v3-base",
+    "leave_out_sources": true,
+    "use_token_distance_attn": false,
+    "use_global_pooling": false
+  },
+
+  "experiments": [
+
+    {
+      "_comment": "── Baseline ─────────────────────────────────────────────────────────────────",
+      "name": "gat_base",
+      "_description": "GATConv baseline: 2L 2H mean batchnorm hid300 d64 dr0.5 lr1e-5 2mp DeBERTa lodo"
+    },
+
+    {
+      "_comment": "── hidden_gnn_dim ───────────────────────────────────────────────────────────",
+      "name": "gat_hid128",
+      "hidden_gnn_dim": 128
+    },
+    {
+      "name": "gat_hid500",
+      "hidden_gnn_dim": 500
+    },
+
+    {
+      "_comment": "── dense_hidden_gnn_dim ─────────────────────────────────────────────────────",
+      "name": "gat_dense128",
+      "dense_hidden_gnn_dim": 128
+    },
+
+    {
+      "_comment": "── num_gnn_layers ───────────────────────────────────────────────────────────",
+      "name": "gat_1L",
+      "num_gnn_layers": 1
+    },
+    {
+      "name": "gat_3L",
+      "num_gnn_layers": 3
+    },
+    {
+      "name": "gat_4L",
+      "num_gnn_layers": 4
+    },
+
+    {
+      "_comment": "── heads_gnn ────────────────────────────────────────────────────────────────",
+      "name": "gat_1H",
+      "heads_gnn": 1
+    },
+    {
+      "name": "gat_3H",
+      "heads_gnn": 3
+    },
+    {
+      "name": "gat_4H",
+      "heads_gnn": 4
+    },
+
+    {
+      "_comment": "── dropout ──────────────────────────────────────────────────────────────────",
+      "name": "gat_dr025",
+      "dropout": 0.25
+    },
+    {
+      "name": "gat_dr075",
+      "dropout": 0.75
+    },
+
+    {
+      "_comment": "── learning rate ────────────────────────────────────────────────────────────",
+      "name": "gat_lr1e4",
+      "lr": 0.0001
+    },
+
+    {
+      "_comment": "── norm_type ────────────────────────────────────────────────────────────────",
+      "name": "gat_ln",
+      "norm_type": "layernorm"
+    },
+
+    {
+      "_comment": "── post_mp_layers ───────────────────────────────────────────────────────────",
+      "name": "gat_mp1",
+      "post_mp_layers": 1
+    },
+    {
+      "name": "gat_mp3",
+      "post_mp_layers": 3
+    },
+
+    {
+      "_comment": "── pooling_type ─────────────────────────────────────────────────────────────",
+      "name": "gat_attn",
+      "pooling_type": "attention"
+    },
+
+    {
+      "_comment": "── leave_out_sources ────────────────────────────────────────────────────────",
+      "name": "gat_lodo_off",
+      "leave_out_sources": false
+    },
+    {
+      "_comment": "── use_token_distance_attn ────────────────────────────────────────────────────────",
+      "name": "trans_use_token_distance",
+      "use_token_distance_attn": true
+    }
+
+  ]
+}

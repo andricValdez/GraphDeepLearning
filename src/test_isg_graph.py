@@ -41,7 +41,6 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 import gc
 import mlflow
-from mlflow import MlflowClient
 import matplotlib.pyplot as plt 
 import seaborn as sns
 import argparse
@@ -49,9 +48,12 @@ import json
 import sys
 import os
 import ast  
+import copy
+import inspect
 
 import utils
 import test_utils
+from vanilla_gtn import ISG_VanillaGTN, VanillaGTNWithEdgeConcat, HybridISG_GTN
 
 try:
     from xgboost import XGBClassifier
@@ -61,9 +63,6 @@ except ImportError:
 
 mlflow.set_tracking_uri(uri="http://localhost:8081")
 mlflow.set_tracking_uri("/home/avaldez/projects/GraphDeepLearning/mlruns")
-client = MlflowClient()
-experiment_id = "0"
-run = client.create_run(experiment_id)
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 # Configs
@@ -117,15 +116,64 @@ DOMAIN2ID = {
     'unknown': 3
 }
 
-def log_conf_matrix(y_pred, y_true):
+GNN_TYPES = {'GCNConv', 'GINConv', 'GATConv', 'TransformerConv'}
+GTN_TYPES = {'Vanilla-GTN-NoEdge', 'Vanilla-GTN-EdgeConcat', 'ISG-VanillaGTN', 'Hybrid-ISG-GTN'}
+
+
+# Add language code mapping and spaCy model loading
+LANGUAGE_MODELS = {
+    'en': spacy.load("en_core_web_sm")
+}
+
+LANGUAGE_NAME2CODE = {
+    'English': 'en', 'Spanish': 'es', 'Portuguese': 'pt',
+    'Catalan': 'ca', 'Gallego': 'gl', 'Euskera': 'eu',
+    'en': 'en', 'es': 'es', 'pt': 'pt', 'ca': 'ca', 'gl': 'gl', 'eu': 'eu'
+}
+
+def log_conf_matrix(y_pred, y_true, labels=None):
     # Log confusion matrix as image
-    cm = confusion_matrix(y_pred, y_true)
-    classes = ["0", "1"]
+    if labels is None:
+        labels = sorted(set(y_true) | set(y_pred))
+    cm = confusion_matrix(y_true, y_pred, labels=labels)
+    classes = [str(label) for label in labels]
     df_cfm = pd.DataFrame(cm, index = classes, columns = classes)
     plt.figure(figsize = (10,7))
     cfm_plot = sns.heatmap(df_cfm, annot=True, cmap='Blues', fmt='g')
     cfm_plot.figure.savefig(f'{utils.OUTPUT_DIR_PATH}/images/cm.png')
     mlflow.log_artifact(f"{utils.OUTPUT_DIR_PATH}/images/cm.png")
+
+
+def configure_mlflow_run(config: dict, dataset_name: str, domain: str | None = None):
+    mlflow.set_experiment(config.get("mlflow_exp_name", "Ablation-Study-ISG"))
+
+    experiment_name = config.get("name", "manual")
+    cutoff = config["cut_off_dataset"]
+
+    if domain:
+        run_name = f"lodo_{experiment_name}_{dataset_name}_{cutoff}perc_{domain}"
+        run_description = (
+            f"Run experiment {experiment_name} for GNN Classification Task "
+            f"using dataset {dataset_name} with {cutoff} % cutoff leaving out {domain} domains"
+        )
+    else:
+        run_name = f"{experiment_name}_{dataset_name}_{cutoff}perc"
+        run_description = (
+            f"Run experiment {experiment_name} for GNN Classification Task "
+            f"using dataset {dataset_name} with {cutoff} % cutoff."
+        )
+
+    run_tags = {
+        "mlflow.note.content": run_description,
+        "mlflow.source.type": "LOCAL",
+        "mlflow.runName": run_name,
+    }
+    return run_tags
+
+
+def get_main_kwargs(config: dict) -> dict:
+    accepted_params = inspect.signature(main).parameters
+    return {key: value for key, value in config.items() if key in accepted_params}
 
 @lru_cache(maxsize=10000)
 def get_synonyms(word):
@@ -228,30 +276,6 @@ def nlp_pipeline(docs: list, params = {'get_multilevel_lang_features': False}):
             nlp_doc._.multilevel_lang_info = get_multilevel_lang_features(nlp_doc)
         doc_lst.append(nlp_doc)
     return doc_lst
-    
-    #for doc in tqdm(docs, desc="nlp_spacy_docs: "):
-    #    nlp_doc = nlp(doc)
-    #    if params['get_multilevel_lang_features'] == True:
-    #        nlp_doc._.multilevel_lang_info = get_multilevel_lang_features(nlp_doc)
-    #    doc_lst.append(nlp_doc)
-    #return doc_lst
-
-
-# Add language code mapping and spaCy model loading
-LANGUAGE_MODELS = {
-    'en': spacy.load("en_core_web_sm"),
-    'es': spacy.load("es_core_news_sm"),
-    'pt': spacy.load("pt_core_news_sm"),
-    'ca': spacy.load("es_core_news_sm"),  # fallback
-    'gl': spacy.load("es_core_news_sm"),  # fallback
-    'eu': spacy.load("es_core_news_sm")   # fallback
-}
-
-LANGUAGE_NAME2CODE = {
-    'English': 'en', 'Spanish': 'es', 'Portuguese': 'pt',
-    'Catalan': 'ca', 'Gallego': 'gl', 'Euskera': 'eu',
-    'en': 'en', 'es': 'es', 'pt': 'pt', 'ca': 'ca', 'gl': 'gl', 'eu': 'eu'
-}
 
 def nlp_pipeline_multilang(texts: list, langs: list):
     """Process documents with appropriate spaCy model based on language list."""
@@ -455,20 +479,24 @@ class ISG():
 
         return output_list, avg_nodes / len(output_list), avg_edges / len(output_list)
 
-
 class EarlyStopper:
-    def __init__(self, patience=1, min_delta=0):
+    def __init__(self, patience=1, min_delta=0, mode='min'):
         self.patience = patience
         self.min_delta = min_delta
+        self.mode = mode
         self.counter = 0
-        self.min_validation_loss = float('inf')
+        self.best_score = float('inf') if mode == 'min' else float('-inf')
 
-    def early_stop(self, validation_loss):
-        #print(validation_loss, self.min_validation_loss, self.counter)
-        if validation_loss <= self.min_validation_loss:
-            self.min_validation_loss = validation_loss
+    def early_stop(self, score):
+        if self.mode == 'min':
+            improved = score <= (self.best_score - self.min_delta)
+        else:
+            improved = score >= (self.best_score + self.min_delta)
+
+        if improved:
+            self.best_score = score
             self.counter = 0
-        elif validation_loss > (self.min_validation_loss + self.min_delta):
+        else:
             self.counter += 1
             if self.counter >= self.patience:
                 return True
@@ -519,8 +547,9 @@ class GNN(nn.Module):
         post_mp = []
         for i in range(len(dims) - 1):
             post_mp.append(nn.Linear(dims[i], dims[i + 1]))
-            #if i < len(dims) - 2:
-            #    post_mp.append(nn.ReLU())
+            if i < len(dims) - 2:
+                post_mp.append(nn.ReLU())
+                post_mp.append(nn.Dropout(dropout))
         self.post_mp = nn.Sequential(*post_mp)
 
     def build_conv_model(self, input_dim, hidden_dim, heads):
@@ -541,7 +570,7 @@ class GNN(nn.Module):
     def build_norm_layer(self, dim):
         if self.norm_type == 'batchnorm':
             return nn.BatchNorm1d(dim)
-        elif self.norm_type == 'layernrom':
+        elif self.norm_type == 'layernorm':
             return nn.LayerNorm(dim)
         else:
             return nn.Identity()
@@ -583,7 +612,7 @@ class GNN(nn.Module):
         x = self.global_pool(x, batch)
         return x
 
-    def forward(self, x, edge_index, edge_attr=None, batch=None):
+    def forward(self, x, edge_index, edge_attr=None, batch=None, token_distance=None):
         x = self.get_graph_embedding(x, edge_index, edge_attr, batch)
         logits = self.post_mp(x)
         return logits
@@ -601,7 +630,6 @@ class GCNClassifier(torch.nn.Module):
         x = self.conv2(x, edge_index)
         x = global_mean_pool(x, batch)  # → (batch_size, hidden_dim)
         return F.log_softmax(x, dim=1)
-
 
 def get_node_features_from_doc(graph, text, tokenizer, model, device, max_length=512):
     # 1. Tokenize entire document
@@ -808,11 +836,7 @@ def extract_feat(graph_data, texts, labels, domains, device, tokenizer, model, p
             with torch.no_grad():
                 dep_embed_tensor = dep_embedding(pyg_data.dep_id.to(device)).cpu()
             pyg_data.edge_attr = dep_embed_tensor
-            pyg_data.token_distance = torch.tensor(
-                [graph[u][v]['token_distance'] for u, v in graph.edges()],
-                dtype=torch.float,
-                device=device
-            )
+            pyg_data.token_distance = pyg_data.token_distance.to(dtype=torch.float, device=device)
             pyg_data.x = node_feats
             pyg_data.y = torch.tensor([labels[doc_id]])
             data_list.append(pyg_data)
@@ -857,7 +881,7 @@ def create_vocab_v2(texts_nlp, stop_words=False, special_chars=False, min_df=1, 
     word_to_index = {w: i for i, w in enumerate(vocab)}
     return vocab, word_to_index
 
-def train_mlp():
+def train_mlp(output_dim=2):
     # Hyperparameters
     cuda_num = 0
     learning_rate = 0.0001
@@ -866,8 +890,6 @@ def train_mlp():
     num_layers = 3
     dropout = 0.5
     patience = 15
-    output_dim = 2
-
     # Dataset settings
     cut_off_dataset = '10-10-10'
     dataset = "autext23"
@@ -955,19 +977,39 @@ def balance_df(df, group_by="source"):
         raise ValueError(f"DataFrame must contain '{group_by}' and 'label' columns")
 
     balanced_parts = []
-    for group_val, group_df in df.groupby(group_by):
+    for _, group_df in df.groupby(group_by):
         label_counts = group_df['label'].value_counts()
         if len(label_counts) < 2:
             balanced_parts.append(group_df)
             continue
 
-        min_count = min(label_counts[0], label_counts[1])
-        df_0 = group_df[group_df['label'] == 0].sample(min_count, random_state=42)
-        df_1 = group_df[group_df['label'] == 1].sample(min_count, random_state=42)
-        balanced_parts.append(pd.concat([df_0, df_1]))
+        min_count = label_counts.min()
+        balanced_group = (
+            group_df.groupby('label', group_keys=False)
+            .apply(lambda label_df: label_df.sample(min_count, random_state=42))
+        )
+        balanced_parts.append(balanced_group)
 
     return pd.concat(balanced_parts).sample(frac=1, random_state=42).reset_index(drop=True)
 
+
+def infer_num_classes(*label_lists):
+    labels = sorted({int(label) for label_list in label_lists for label in label_list})
+    return len(labels), labels
+
+
+def compute_class_weights(data_list, num_classes, device):
+    train_targets = torch.tensor([int(item.y.item()) for item in data_list], dtype=torch.long)
+    class_counts = torch.bincount(train_targets, minlength=num_classes).float()
+    class_weights = train_targets.numel() / (num_classes * class_counts.clamp(min=1.0))
+    return class_weights.to(device), class_counts
+
+
+def canonicalize_dataset_name(dataset_name):
+    dataset_aliases = {
+        'autext_s2': 'autext23_s2'
+    }
+    return dataset_aliases.get(dataset_name, dataset_name)
 
 def build_domain2id(train_set, val_set, test_set):
     # Extract unique domain values from the source column
@@ -987,8 +1029,8 @@ def test_gnn(model, device, loader, criterion):
     for data in loader:
         data = data.to(device)
         with torch.no_grad():
-            #out = model(data)
-            out = model(data.x, data.edge_index, data.edge_attr, data.batch)
+            token_dist = data.token_distance if hasattr(data, 'token_distance') else None
+            out = model(data.x, data.edge_index, data.edge_attr, data.batch, token_dist)
         pred = out.argmax(dim=1)
         all_preds.extend(pred.cpu().numpy())
         all_labels.extend(data.y.cpu().numpy())
@@ -1023,21 +1065,85 @@ def build_projector(input_dim=768, hidden_dim=512, output_dim=256, dropout=0.1, 
     return nn.Sequential(*layers)
 
 
-def main(dataset_name, cut_off_dataset, cuda_num=0, 
-         graph_type='directed', edge_attr = False, 
-         build_graph = True, max_features=None,
-         reduce_dim_emb = True,  reduced_dim = 256,
-         add_pos_feat = True, lr = 0.0001, min_df = 2,
-         max_df = 0.9, patience = 10, hidden_gnn_dim = 100,
-         dense_hidden_gnn_dim = 64, num_gnn_layers = 1, 
-         heads_gnn = 1, gnn_type = 'GATConv', add_domain_feat=False,
-         dropout = 0.5, lang_model_name = 'microsoft/deberta-v3-base',
+def build_model(gnn_type, input_dim, hidden_dim, dense_hidden_dim, num_classes,
+                dropout, num_layers, heads, edge_attr, norm_type, pooling_type,
+                post_mp_layers, dep_emb_dim, use_token_distance_attn,
+                use_global_pooling, device, use_edge_bias=True):
+    """Factory that instantiates either a GNN or a GTN architecture."""
+    edge_attr_dim = dep_emb_dim if edge_attr else None
+
+    if gnn_type in GNN_TYPES:
+        return GNN(
+            input_dim=input_dim, hidden_dim=hidden_dim,
+            dense_hidden_dim=dense_hidden_dim, output_dim=num_classes,
+            dropout=dropout, num_layers=num_layers, edge_attr=edge_attr,
+            gnn_type=gnn_type, heads=heads, norm_type=norm_type,
+            pooling_type=pooling_type, post_mp_layers=post_mp_layers,
+        ).to(device)
+
+    if gnn_type == 'Vanilla-GTN-NoEdge':
+        return VanillaGTNWithEdgeConcat(
+            input_dim=input_dim, hidden_dim=hidden_dim,
+            dense_hidden_dim=dense_hidden_dim, output_dim=num_classes,
+            dropout=dropout, num_layers=num_layers, use_edge_attr=False,
+            heads=heads, norm_type=norm_type, pooling_type=pooling_type,
+            post_mp_layers=post_mp_layers, edge_attr_dim=None,
+            ffn_mult=4, attn_dropout=0.1,
+        ).to(device)
+
+    if gnn_type == 'Vanilla-GTN-EdgeConcat':
+        return VanillaGTNWithEdgeConcat(
+            input_dim=input_dim, hidden_dim=hidden_dim,
+            dense_hidden_dim=dense_hidden_dim, output_dim=num_classes,
+            dropout=dropout, num_layers=num_layers, use_edge_attr=True,
+            heads=heads, norm_type=norm_type, pooling_type=pooling_type,
+            post_mp_layers=post_mp_layers, edge_attr_dim=edge_attr_dim,
+            ffn_mult=4, attn_dropout=0.1,
+        ).to(device)
+
+    if gnn_type == 'ISG-VanillaGTN':
+        return ISG_VanillaGTN(
+            input_dim=input_dim, hidden_dim=hidden_dim,
+            dense_hidden_dim=dense_hidden_dim, output_dim=num_classes,
+            dropout=dropout, num_layers=num_layers, use_edge_attr=edge_attr,
+            use_token_distance=use_token_distance_attn, heads=heads,
+            norm_type=norm_type, pooling_type=pooling_type,
+            post_mp_layers=post_mp_layers, edge_attr_dim=edge_attr_dim,
+            ffn_mult=4, attn_dropout=0.1, use_global_pooling=use_global_pooling,
+        ).to(device)
+
+    if gnn_type == 'Hybrid-ISG-GTN':
+        return HybridISG_GTN(
+            input_dim=input_dim, hidden_dim=hidden_dim,
+            dense_hidden_dim=dense_hidden_dim, output_dim=num_classes,
+            dropout=dropout, num_layers=num_layers, use_edge_attr=edge_attr,
+            use_token_distance=use_token_distance_attn, use_edge_bias=use_edge_bias,
+            heads=heads, norm_type=norm_type, pooling_type=pooling_type,
+            post_mp_layers=post_mp_layers, edge_attr_dim=edge_attr_dim,
+            ffn_mult=4, attn_dropout=0.1, use_global_pooling=use_global_pooling,
+        ).to(device)
+
+    raise ValueError(f"Unknown gnn_type '{gnn_type}'. Valid: {GNN_TYPES | GTN_TYPES}")
+
+
+def main(dataset_name, cut_off_dataset, cuda_num=0,
+         graph_type='directed', edge_attr=False,
+         build_graph=True, max_features=None,
+         reduce_dim_emb=True, reduced_dim=256,
+         add_pos_feat=True, lr=0.0001, min_df=2,
+         max_df=0.9, patience=10, hidden_gnn_dim=100,
+         dense_hidden_gnn_dim=64, num_gnn_layers=1,
+         heads_gnn=1, gnn_type='GATConv', add_domain_feat=False,
+         dropout=0.5, lang_model_name='microsoft/deberta-v3-base',
          project_after_concat=False, stop_words=False, special_chars=False,
          leave_out_sources=None, data=None, file_name_data='', output_dir='',
-         norm_type='batchnorm', post_mp_layers=2, pooling_type='mean', 
-         balance_dataset = True
+         norm_type='batchnorm', post_mp_layers=2, pooling_type='mean',
+         balance_dataset=True,
+         use_token_distance_attn=True, use_global_pooling=False,
+         use_edge_bias=True,
     ):
 
+    dataset_name = canonicalize_dataset_name(dataset_name)
     mlflow.log_param("dataset", dataset_name)
     mlflow.log_param("cut_off_dataset", cut_off_dataset)
 
@@ -1046,19 +1152,21 @@ def main(dataset_name, cut_off_dataset, cuda_num=0,
     pos_emb_dim = 32
     dep_emb_dim = 32
     domain_emb_dim = 32
-    batch_size = 512
-    num_epochs = 200
+    batch_size = 128
+    num_epochs = 300
 
     tokenizer = AutoTokenizer.from_pretrained(lang_model_name)
     lang_model = AutoModel.from_pretrained(lang_model_name).to(device)
 
     input_gnn_dim = lang_model.config.hidden_size 
     input_proj_dim = lang_model.config.hidden_size 
+    num_classes = None
+    label_list = []
 
     if build_graph: 
 
-        train_text_set, val_text_set, test_text_set = test_utils.read_dataset(dataset_name)
-        if dataset_name == 'autext24':
+        train_text_set, val_text_set, test_text_set = test_utils.read_dataset(dataset_name, print_info=False)
+        if dataset_name.startswith('autext24'):
             train_text_set = train_text_set[train_text_set['language'] == 'en'].reset_index(drop=True)
             val_text_set = val_text_set[val_text_set['language'] == 'en'].reset_index(drop=True)
             test_text_set = test_text_set[test_text_set['language'] == 'en']
@@ -1108,7 +1216,7 @@ def main(dataset_name, cut_off_dataset, cuda_num=0,
         print("Label distribution per source in Validation set:\n", val_set.groupby("source")["label"].value_counts())
         print("Label distribution per source in Test set:\n", test_set.groupby("source")["label"].value_counts())
 
-        if dataset_name == 'autext24':
+        if dataset_name.startswith('autext24'):
             print("Language distribution per source in Train set:\n", train_set.groupby("language")["label"].value_counts())
             print("Language distribution per source in Val set:\n", val_set.groupby("language")["label"].value_counts())
             print("Language distribution per source in Test set:\n", test_set.groupby("language")["label"].value_counts())
@@ -1130,6 +1238,9 @@ def main(dataset_name, cut_off_dataset, cuda_num=0,
         train_labels = list(train_set['label'])[:limit]
         val_labels = list(val_set['label'])[:limit]
         test_labels = list(test_set['label'])[:limit]
+        num_classes, label_list = infer_num_classes(train_labels, val_labels, test_labels)
+        mlflow.log_param("num_classes", num_classes)
+        mlflow.log_param("class_labels", label_list)
 
         train_domains = list(train_set['source'])[:limit]
         val_domains = list(val_set['source'])[:limit]
@@ -1153,7 +1264,7 @@ def main(dataset_name, cut_off_dataset, cuda_num=0,
         print("vocab_size: ", len(vocab))
         with open(f"{test_utils.OUTPUT_DIR_PATH}/{dataset_name}_vocab.txt", 'w', encoding='utf-8') as file:
             for item in vocab:
-                file.write(str(item) + '\n')
+                file.write(str(item) + '\n') 
 
         isg = ISG(graph_type=graph_type, vocab=vocab, output_format='networkx', apply_prep=True, parallel_exec=False, language='en', use_synonyms=False)
 
@@ -1210,6 +1321,13 @@ def main(dataset_name, cut_off_dataset, cuda_num=0,
     else:
         ...
 
+    if data_train_list:
+        inferred_labels = sorted({int(item.y.item()) for item in data_train_list + data_val_list + data_test_list})
+        num_classes = len(inferred_labels)
+        label_list = inferred_labels
+        mlflow.log_param("num_classes", num_classes)
+        mlflow.log_param("class_labels", label_list)
+
     train_loader = DataLoader(data_train_list, batch_size=batch_size, shuffle=True, num_workers=0) 
     val_loader = DataLoader(data_val_list, batch_size=batch_size, shuffle=False, num_workers=0)
     test_loader = DataLoader(data_test_list, batch_size=batch_size, shuffle=False, num_workers=0)
@@ -1229,35 +1347,39 @@ def main(dataset_name, cut_off_dataset, cuda_num=0,
             input_gnn_dim += domain_emb_dim
 
     test_utils.set_random_seed(42)
-    
-    model = GNN(
-                input_dim = input_gnn_dim, 
-                hidden_dim = hidden_gnn_dim, 
-                dense_hidden_dim = dense_hidden_gnn_dim, 
-                output_dim = 2, 
-                dropout = dropout, 
-                num_layers = num_gnn_layers, 
-                edge_attr = edge_attr, 
-                gnn_type = gnn_type, 
-                heads = heads_gnn,
-                norm_type=norm_type,    
-                pooling_type=pooling_type,      
-                post_mp_layers=post_mp_layers             
-            ).to(device)
 
+    model = build_model(
+        gnn_type=gnn_type, input_dim=input_gnn_dim, hidden_dim=hidden_gnn_dim,
+        dense_hidden_dim=dense_hidden_gnn_dim, num_classes=num_classes,
+        dropout=dropout, num_layers=num_gnn_layers, heads=heads_gnn,
+        edge_attr=edge_attr, norm_type=norm_type, pooling_type=pooling_type,
+        post_mp_layers=post_mp_layers, dep_emb_dim=dep_emb_dim,
+        use_token_distance_attn=use_token_distance_attn,
+        use_global_pooling=use_global_pooling, device=device,
+        use_edge_bias=use_edge_bias,
+    )
+
+    class_weights, class_counts = compute_class_weights(data_train_list, num_classes, device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
-    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3, verbose=True)
+    scheduler = ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=3, verbose=True)
 
-    criterion = torch.nn.CrossEntropyLoss()
-    early_stopper = EarlyStopper(patience=patience, min_delta=0)
+    label_smoothing = 0.1 if num_classes and num_classes > 2 else 0.0
+    criterion = torch.nn.CrossEntropyLoss(weight=class_weights, label_smoothing=label_smoothing)
+    early_stopper = EarlyStopper(patience=patience, min_delta=0, mode='max')
     print(model)
+    print("class_counts:", class_counts.tolist())
+    print("class_weights:", [round(float(weight), 4) for weight in class_weights.detach().cpu()])
     mlflow.log_param('model_params', str(model))
+    mlflow.log_param('class_counts', class_counts.tolist())
+    mlflow.log_param('class_weights', [round(float(weight), 6) for weight in class_weights.detach().cpu()])
 
     logger.info("Init GNN training!")
     start_time = time.time()
 
+    best_val_f1_score = float('-inf')
     best_test_acc_score = 0
     best_test_f1_score = 0
+    best_model_state = copy.deepcopy(model.state_dict())
     stop_epoch = 0
     for epoch in range(num_epochs):
         model.train()
@@ -1265,9 +1387,11 @@ def main(dataset_name, cut_off_dataset, cuda_num=0,
         for data in train_loader:
             data = data.to(device)
             optimizer.zero_grad()
-            out = model(data.x, data.edge_index, data.edge_attr, data.batch)
+            token_dist = data.token_distance if hasattr(data, 'token_distance') else None
+            out = model(data.x, data.edge_index, data.edge_attr, data.batch, token_dist)
             loss = criterion(out, data.y)
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
             train_loss += loss.item()
         train_loss = train_loss / len(train_loader)
@@ -1275,10 +1399,13 @@ def main(dataset_name, cut_off_dataset, cuda_num=0,
         val_f1_macro, val_accuracy, val_loss, _, _ = test_gnn(model, device, val_loader, criterion)
         test_f1_macro, test_accuracy, test_loss, _, _ = test_gnn(model, device, test_loader, criterion)
 
-        print(f"Epoch {epoch:02d} | Train-Loss {train_loss:4f}  | Val-Loss {val_loss:4f} | Test-Loss {test_loss:4f} | Val-Acc: {val_accuracy:4f} | Test-Acc: {test_accuracy:4f} | Test-F1Macro: {test_f1_macro:4f}")
+        print(f"Epoch {epoch:02d} | Train-Loss {train_loss:4f}  | Val-Loss {val_loss:4f} | Test-Loss {test_loss:4f} | Val-Acc: {val_accuracy:4f} | Val-F1Macro: {val_f1_macro:4f} | Test-Acc: {test_accuracy:4f} | Test-F1Macro: {test_f1_macro:4f}")
         
-        # Step the scheduler based on val_loss
-        #scheduler.step(val_loss)
+        scheduler.step(val_f1_macro)
+
+        if val_f1_macro > best_val_f1_score:
+            best_val_f1_score = val_f1_macro
+            best_model_state = copy.deepcopy(model.state_dict())
 
         if test_accuracy > best_test_acc_score:
             best_test_acc_score = test_accuracy
@@ -1293,47 +1420,63 @@ def main(dataset_name, cut_off_dataset, cuda_num=0,
         mlflow.log_metric(key=f"Loss-test", value=float(test_loss), step=epoch)
 
         stop_epoch = epoch
-        if early_stopper.early_stop(val_loss):
+        if early_stopper.early_stop(val_f1_macro):
             print('Early stopping triggered!')
             break
 
     logger.info("Done GNN training!")
     print("--- %s Graph Training Time ---" % (time.time() - start_time))
 
+    model.load_state_dict(best_model_state)
+    val_f1_macro, val_accuracy, val_loss, _, _ = test_gnn(model, device, val_loader, criterion)
+
     model_save_path = f"{output_dir}/models/gnn_model_{file_name_data}.pth"
     model_config_path = f"{output_dir}/models/config_{file_name_data}.json"
-    #save_model(model, model_save_path, model_config_path)
+    if gnn_type in GNN_TYPES:
+        save_model(model, model_save_path, model_config_path)
+    else:
+        torch.save(model.state_dict(), model_save_path)
 
     test_f1_macro, test_accuracy, test_loss, preds_test, labels_test = test_gnn(model, device, test_loader, criterion)
-    print(f" ----> Test-Loss {test_loss:4f} | Test-Acc: {test_accuracy:4f} | Test-F1Macro: {test_f1_macro:4f}")
+    f1_weighted = f1_score(labels_test, preds_test, average='weighted', zero_division=0)
+    f1_per_class = f1_score(labels_test, preds_test, average=None, labels=label_list, zero_division=0)
+    print(f" ----> Test-Loss {test_loss:4f} | Test-Acc: {test_accuracy:4f} | Test-F1Macro: {test_f1_macro:4f} | Test-F1Weighted: {f1_weighted:4f}")
+    print("Per-class F1:", {cls: round(float(f1), 4) for cls, f1 in zip(label_list, f1_per_class)})
 
     print("preds_test:  ", sorted(Counter(preds_test).items()))
     print("labels_test: ", sorted(Counter(labels_test).items()))
-    cm = confusion_matrix(preds_test, labels_test)
+    cm = confusion_matrix(labels_test, preds_test, labels=label_list)
     print(cm)
 
-    log_conf_matrix(preds_test, labels_test)
+    log_conf_matrix(preds_test, labels_test, labels=label_list)
     mlflow.log_metric(key=f"num_epochs", value=int(num_epochs))
     mlflow.log_metric(key=f"stop_epoch", value=int(stop_epoch))
-    mlflow.log_metric(key=f"Final-F1Macro-val", value=float(val_f1_macro))
-    mlflow.log_metric(key=f"Final-Accuracy-test", value=float(val_accuracy))
-    mlflow.log_metric(key=f"Final-Loss-test", value=float(val_loss))
-    mlflow.log_metric(key=f"Final-F1Macro-test", value=float(test_f1_macro))
-    mlflow.log_metric(key=f"Final-Accuracy-test", value=float(test_accuracy))
-    mlflow.log_metric(key=f"Final-Loss-test", value=float(test_loss))
-    mlflow.log_metric(key=f"Best-Accuracy-test", value=float(best_test_acc_score))
-    mlflow.log_metric(key=f"Best-F1Macro-test", value=float(best_test_f1_score))
+    mlflow.log_metric(key="Final-F1Macro-val", value=float(val_f1_macro))
+    mlflow.log_metric(key="Final-Accuracy-val", value=float(val_accuracy))
+    mlflow.log_metric(key="Final-Loss-val", value=float(val_loss))
+    mlflow.log_metric(key="Final-F1Macro-test", value=float(test_f1_macro))
+    mlflow.log_metric(key="Final-F1Weighted-test", value=float(f1_weighted))
+    mlflow.log_metric(key="Final-Accuracy-test", value=float(test_accuracy))
+    mlflow.log_metric(key="Final-Loss-test", value=float(test_loss))
+    mlflow.log_metric(key="Best-Accuracy-test", value=float(best_test_acc_score))
+    mlflow.log_metric(key="Best-F1Macro-test", value=float(best_test_f1_score))
+    for cls_id, cls_f1 in zip(label_list, f1_per_class):
+        mlflow.log_metric(key=f"F1-class-{cls_id}", value=float(cls_f1))
     mlflow.log_artifact(log_file_path)
 
     # ********************************************************************************* analysis preds
 
     _, _, test_text_set = test_utils.read_dataset(dataset_name, print_info=False)
 
-    if dataset_name == 'autext24':
+    if dataset_name.startswith('autext24'):
         test_text_set = test_text_set[test_text_set['language'] == 'en']
     
     cut_off_test = int(cut_off_dataset.split('_')[2])
     test_set = test_text_set[:int(len(test_text_set) * (cut_off_test / 100))][:]
+
+    if 'model' not in test_set.columns:
+        test_set['model'] = 'unknown'
+
 
     test_set['preds_test'] = preds_test
     test_set['labels_test'] = labels_test
@@ -1415,40 +1558,47 @@ if __name__ == "__main__":
         del config['_done']
     else:
         config = {
+            'name': 'manual_run',
+            'mlflow_exp_name': 'Ablation-Study-ISG',
             'graph_type': 'undirected', # directed, undirected
-            'dataset_name': 'coling24', # autext23, autext24, semeval24, coling24
-            'cut_off_dataset': '1_1_1',
+            'dataset_name': 'autext23_s2', # autext23, autext23_s2, autext24, autext24_s2, semeval24, coling24
+            'cut_off_dataset': '25_25_25',
             # autext23:  10-10-10 | 50-50-50 | 100-100-100*
             # semeval24: 1-1-1 | 5-5-5 | 10-10-10* | 25-25-25 | 50-50-50*
             # coling24: 1-1-1 | 2-2-2 | 5-10-5 | 10-10-10*
 
-            'cuda_num': 0,
-            'build_graph': True,
-            'edge_attr': True,
-            'reduce_dim_emb': True, # False->768
+            'cuda_num': 1, 
+            'build_graph': False,
+            'edge_attr': True, 
+            'reduce_dim_emb': False, # False->768
             'add_pos_feat': True,
             'add_domain_feat': False,
             'project_after_concat': True, # True -> concat all and project | False -> project_llm and then concat
             'reduced_dim': 256,
             
-            'balance_dataset': True,
-            'max_features': 20000, # None -> all | 5000, 10000, 15000, 20000
+            'balance_dataset': False,
+            'max_features': 25000, # None -> all | 5000, 10000, 15000, 20000
             'min_df': 2, # 2->autext | 5->semeval | 5-coling
             'max_df': 1.0,
             'stop_words': False,
             'special_chars': False,
  
             'patience': 10,
-            'hidden_gnn_dim': 100,
+            'hidden_gnn_dim': 300,
             'dense_hidden_gnn_dim': 64,
-            'num_gnn_layers': 1,
-            'heads_gnn': 1,
+            'num_gnn_layers': 2,
+            'heads_gnn': 2,
             'dropout': 0.5,
-            'lr': 0.00005, # 0001, 00001, 000001
+            'lr': 0.00001, # 0001, 00001, 000001
             'gnn_type': 'TransformerConv', # GCNConv, GINConv, GATConv, TransformerConv 
+            # Vanilla-GTN-NoEdge', Vanilla-GTN-EdgeConcat, ISG-VanillaGTN, Hybrid-ISG-GTN, 
+
             'norm_type': 'batchnorm',        # 'batchnorm', 'layernorm', or None
             'post_mp_layers': 2,             # 1, 2, or 3 layers
-            'pooling_type': 'mean',           # 'mean', 'attention', 'max', 'sum', 'set2set'  
+            'pooling_type': 'attention',           # 'mean', 'attention', 'max', 'sum', 'set2set'  
+            
+            'use_dep_frequency': True,      # Usar frecuencia de dependencias (Hybrid-ISG-GTN)
+            'use_sentence_aware': True,     # Usar atención sentence-aware (Hybrid-ISG-GTN)
 
             ## intfloat/multilingual-e5-large
             ## google-bert/bert-base-multilingual-uncased
@@ -1456,13 +1606,16 @@ if __name__ == "__main__":
             ## FacebookAI/roberta-base
             ## microsoft/deberta-v3-base
             'lang_model_name': 'microsoft/deberta-v3-base' ,
-            'leave_out_sources': True, # True, False, 'LODO'
+            'leave_out_sources': False, # True, False, 'LODO'
         }
 
+    config['dataset_name'] = canonicalize_dataset_name(config['dataset_name'])
     dataset_name = config['dataset_name']
     lodo_domains = {
         'autext23': ["tweets", "legal", "wiki"],
+        'autext23_s2': ["tweets", "legal", "wiki"],
         'autext24': ["literary", "news", "reviews", "tweets", "wikipedia"],
+        'autext24_s2': ["literary", "news", "reviews", "tweets", "wikipedia"],
         'semeval24': ["arxiv", "peerread", "reddit", "wikihow", "wikipedia"],
         'coling24': ["hc3", "m4gt", "mage"]
     }
@@ -1473,19 +1626,12 @@ if __name__ == "__main__":
             config['leave_out_sources'] = [domain]
             config['file_name_data'] = f"isg_data_{dataset_name}_{config['cut_off_dataset']}perc"
             config['output_dir'] = f'{test_utils.EXTERNAL_DISK_PATH}isg_graph'
-
-            mlflow.set_experiment(f"GNN - ISG")
-            run_description = f"""Run experiment for GNN Classification Task using dataset {dataset_name} with {config['cut_off_dataset']} % cutoff leaving out {domain} domains"""
-            run_tags = {
-                'mlflow.note.content': run_description,
-                'mlflow.source.type': "LOCAL"
-            }
+            run_tags = configure_mlflow_run(config, dataset_name, domain=domain)
 
             with mlflow.start_run(tags=run_tags):
-                mlflow.set_tag("mlflow.runName", f"lodo_run_{dataset_name}_{config['cut_off_dataset']}perc")
                 for k, v in config.items():
                     mlflow.log_param(k, v)
-                main(**config)
+                main(**get_main_kwargs(config))
     # Fallback: standard run
     else:
 
@@ -1495,6 +1641,8 @@ if __name__ == "__main__":
             if config['dataset_name'] == 'autext23':
                 # Autext: ["wiki", "tweets", "legal"]
                 config['leave_out_sources'] = ["tweets"] 
+            elif config['dataset_name'] == 'autext23_s2':
+                config['leave_out_sources'] = ["tweets"]
             elif config['dataset_name'] == 'autext24':
                 # Autext: ["literary", "news", "reviews", "tweets", "wikipedia"]
                 # OK - "news", "literary"
@@ -1504,6 +1652,8 @@ if __name__ == "__main__":
                 #  - "news", "reviews"
                 #  - "news", "tweets"
                 config['leave_out_sources'] = ["literary", "news"] 
+            elif config['dataset_name'] == 'autext24_s2':
+                config['leave_out_sources'] = ["literary", "news"]
             elif config['dataset_name'] == 'semeval24':
                 # Semeval ["arxiv", "peerread", "reddit", "wikihow", "wikipedia"]
                 config['leave_out_sources'] = ["wikihow", "wikipedia"]
@@ -1516,16 +1666,9 @@ if __name__ == "__main__":
 
         if not config['build_graph']:
             config['data'] = utils.load_data(config['file_name_data'], path=f'{config["output_dir"]}/', format_file='.pkl', compress=False)
-
-        mlflow.set_experiment(f"GNN - ISG")
-        run_description = f"""Run experiment for GNN Classification Task using dataset {dataset_name} with {config['cut_off_dataset']} % cutoff."""
-        run_tags = {
-            'mlflow.note.content': run_description,
-            'mlflow.source.type': "LOCAL"
-        }
+        run_tags = configure_mlflow_run(config, dataset_name)
 
         with mlflow.start_run(tags=run_tags):
-            mlflow.set_tag("mlflow.runName", f"run_{dataset_name}_{config['cut_off_dataset']}perc")
             for k, v in config.items():
                 mlflow.log_param(k, v)
-            main(**config)
+            main(**get_main_kwargs(config))

@@ -1,0 +1,33 @@
+experiment,gnn_type,description,test_accuracy,test_f1,best_accuracy,best_f1,val_accuracy,val_f1,status,mlflow_run_id
+gcn_base,GCNConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GCNConv,028747f5b686425b91a19d7364f6a2bd
+gcn_base,GCNConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GCNConv,
+gcn_hid128,GCNConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GCNConv,505c17798dfb40528323c64b8879783c
+gcn_hid128,GCNConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GCNConv,
+gcn_hid500,GCNConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GCNConv,f8062dc04cbd429c9d1ab67881294cd7
+gcn_hid500,GCNConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GCNConv,
+gcn_dense128,GCNConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GCNConv,ce9d02cfee9e4f7d811844733e9e5b66
+gcn_dense128,GCNConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GCNConv,
+gcn_1L,GCNConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GCNConv,fe3d1387b68b43afbc750d559a48a0a9
+gcn_1L,GCNConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GCNConv,
+gcn_3L,GCNConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GCNConv,b90416e4877b41828e9c75b48f64c625
+gcn_3L,GCNConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GCNConv,
+gcn_4L,GCNConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GCNConv,c568e059968742e1b0e1becc14b4b64c
+gcn_4L,GCNConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GCNConv,
+gcn_dr025,GCNConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GCNConv,16ce25b2e2e045ab879f181d3589da50
+gcn_dr025,GCNConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GCNConv,
+gcn_dr075,GCNConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GCNConv,dd6bd383f1ac4f1290dfa33a854815a5
+gcn_dr075,GCNConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GCNConv,
+gcn_lr1e4,GCNConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GCNConv,11b13e97783e4c8a87e5609b65f603c2
+gcn_lr1e4,GCNConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GCNConv,
+gcn_ln,GCNConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GCNConv,2fe989bb7bd14d83be9975f9ffc22e9b
+gcn_ln,GCNConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GCNConv,
+gcn_mp1,GCNConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GCNConv,229902568144499992eccb906ebca98b
+gcn_mp1,GCNConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GCNConv,
+gcn_mp3,GCNConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GCNConv,c513f0fd40d34224b6a7e3a61b6a0237
+gcn_mp3,GCNConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GCNConv,
+gcn_attn,GCNConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GCNConv,e69dfcb8cb7f463c8557e1da15cf022b
+gcn_attn,GCNConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GCNConv,
+gcn_lodo_off,GCNConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GCNConv,baaca2e6726a4cffad3b4ba8d5fc3b07
+gcn_lodo_off,GCNConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GCNConv,
+trans_use_token_distance,GCNConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GCNConv,1554401df5d74a908af27c4ed9f51224
+trans_use_token_distance,GCNConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GCNConv,

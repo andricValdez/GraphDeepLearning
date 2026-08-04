@@ -1,0 +1,219 @@
+{
+  "_comment": "OFAT ablation study for TransformerConv on ISG graphs — autext23 subtask2 (6-class multiclass). First experiment builds the PKL; subsequent ones reuse it automatically (runner checks existence).",
+
+  "defaults": {
+    "mlflow_exp_name":        "Ablation-Study-ISG-S2AuText23-TransformerConv",
+    "gnn_type":               "TransformerConv",
+    "build_graph":            false,
+    "graph_type":             "undirected",
+    "dataset_name":           "autext23_s2",
+    "cut_off_dataset":        "100_100_100",
+    "cuda_num":               1,
+
+    "lang_model_name":        "microsoft/deberta-v3-base",
+
+    "edge_attr":              true,
+    "reduce_dim_emb":         false,
+    "add_pos_feat":           true,
+    "add_domain_feat":        false,
+    "project_after_concat":   false,
+    "reduced_dim":            256,
+
+    "balance_dataset":        true,
+    "max_features":           20000,
+    "min_df":                 3,
+    "max_df":                 1.0,
+    "stop_words":             false,
+    "special_chars":          false,
+
+    "patience":               15,
+    "hidden_gnn_dim":         300,
+    "dense_hidden_gnn_dim":   64,
+    "num_gnn_layers":         2,
+    "heads_gnn":              2,
+    "dropout":                0.5,
+    "lr":                     0.00001,
+    "norm_type":              "batchnorm",
+    "post_mp_layers":         2,
+    "pooling_type":           "attention",
+
+    "leave_out_sources":      false,
+    "use_token_distance_attn": false,
+    "use_global_pooling":     false
+  },
+
+  "experiments": [
+
+    {
+      "_comment": "── A. BASELINE ──────────────────────────────────────────────────────────────",
+      "_group": "baseline",
+      "name": "trans_s2_base",
+      "_description": "Baseline full: build PKL + train. 2L 2H mean batchnorm hid300 d128 dr0.5 lr1e-5 2mp DeBERTa balance=true",
+      "build_graph": true
+    },
+
+    {
+      "_comment": "── B. ARCHITECTURE: hidden_gnn_dim ──────────────────────────────────────────",
+      "_group": "arch_ablation",
+      "name": "trans_s2_hid128",
+      "_description": "Smaller hidden dim — less capacity",
+      "hidden_gnn_dim": 128
+    },
+    {
+      "_group": "arch_ablation",
+      "name": "trans_s2_hid200",
+      "_description": "Medium hidden dim",
+      "hidden_gnn_dim": 200
+    },
+    {
+      "_group": "arch_ablation",
+      "name": "trans_s2_hid500",
+      "_description": "Larger hidden dim — more capacity for 6 classes",
+      "hidden_gnn_dim": 500
+    },
+
+    {
+      "_comment": "── B. ARCHITECTURE: num_gnn_layers ──────────────────────────────────────────",
+      "_group": "arch_ablation",
+      "name": "trans_s2_1L",
+      "_description": "Shallow: 1 GNN layer",
+      "num_gnn_layers": 1
+    },
+    {
+      "_group": "arch_ablation",
+      "name": "trans_s2_3L",
+      "_description": "Deep: 3 GNN layers",
+      "num_gnn_layers": 3
+    },
+    {
+      "_group": "arch_ablation",
+      "name": "trans_s2_4L",
+      "_description": "Very deep: 4 GNN layers (risk of over-smoothing)",
+      "num_gnn_layers": 4
+    },
+
+    {
+      "_comment": "── B. ARCHITECTURE: heads_gnn ───────────────────────────────────────────────",
+      "_group": "arch_ablation",
+      "name": "trans_s2_1H",
+      "_description": "Single attention head",
+      "heads_gnn": 1
+    },
+    {
+      "_group": "arch_ablation",
+      "name": "trans_s2_3H",
+      "_description": "3 attention heads",
+      "heads_gnn": 3
+    },
+    {
+      "_group": "arch_ablation",
+      "name": "trans_s2_4H",
+      "_description": "4 attention heads — more expressive for 6-class",
+      "heads_gnn": 4
+    },
+
+    {
+      "_comment": "── B. ARCHITECTURE: classification head (post_mp_layers + dense_hidden) ─────",
+      "_group": "arch_ablation",
+      "name": "trans_s2_mp1",
+      "_description": "Shallow classifier: 1 post-MP layer",
+      "post_mp_layers": 1
+    },
+    {
+      "_group": "arch_ablation",
+      "name": "trans_s2_mp3",
+      "_description": "Deeper classifier: 3 post-MP layers — recommended for 6-class",
+      "post_mp_layers": 3
+    },
+    {
+      "_group": "arch_ablation",
+      "name": "trans_s2_dense64",
+      "_description": "Narrower classifier head (64)",
+      "dense_hidden_gnn_dim": 128
+    },
+    {
+      "_group": "arch_ablation",
+      "name": "trans_s2_dense256",
+      "_description": "Wider classifier head (256)",
+      "dense_hidden_gnn_dim": 256
+    },
+
+    {
+      "_comment": "── C. LEARNING RATE ─────────────────────────────────────────────────────────",
+      "_group": "lr_ablation",
+      "name": "trans_s2_lr1e4",
+      "_description": "Higher LR: 1e-4",
+      "lr": 0.0001
+    },
+    {
+      "_group": "lr_ablation",
+      "name": "trans_s2_lr5e5",
+      "_description": "Mid LR: 5e-5",
+      "lr": 0.00005
+    },
+
+    {
+      "_comment": "── C. DROPOUT ───────────────────────────────────────────────────────────────",
+      "_group": "lr_ablation",
+      "name": "trans_s2_dr025",
+      "_description": "Light regularization: dropout=0.25",
+      "dropout": 0.25
+    },
+    {
+      "_group": "lr_ablation",
+      "name": "trans_s2_dr075",
+      "_description": "Heavy regularization: dropout=0.75",
+      "dropout": 0.75
+    },
+
+    {
+      "_comment": "── D. NORM + POOLING ────────────────────────────────────────────────────────",
+      "_group": "norm_pool_ablation",
+      "name": "trans_s2_ln",
+      "_description": "LayerNorm instead of BatchNorm — better for small batches",
+      "norm_type": "layernorm"
+    },
+    {
+      "_group": "norm_pool_ablation",
+      "name": "trans_s2_attn_pool",
+      "_description": "Attention pooling — learned aggregation per class",
+      "pooling_type": "mean"
+    },
+    {
+      "_group": "norm_pool_ablation",
+      "name": "trans_s2_max_pool",
+      "_description": "Max pooling — selects strongest activations",
+      "pooling_type": "max"
+    },
+    {
+      "_group": "norm_pool_ablation",
+      "name": "trans_s2_sum_pool",
+      "_description": "Sum pooling — sensitive to graph size",
+      "pooling_type": "sum"
+    },
+
+    {
+      "_group": "model_ablation",
+      "name": "trans_s2_hybrid_gtn",
+      "_description": "Hybrid-ISG-GTN: combines ISG-GTN with standard GNN pathway",
+      "gnn_type": "Hybrid-ISG-GTN",
+      "use_token_distance_attn": true,
+      "use_global_pooling": false
+    },
+    {
+      "_group": "model_ablation",
+      "name": "trans_s2_gat",
+      "_description": "GATConv baseline — no structural PE, standard graph attention",
+      "gnn_type": "GATConv"
+    },
+    {
+      "_group": "model_ablation",
+      "name": "trans_s2_gcn",
+      "_description": "GCNConv baseline — simplest graph convolution",
+      "gnn_type": "GCNConv",
+      "heads_gnn": 1,
+      "edge_attr": false
+    }
+
+  ]
+}

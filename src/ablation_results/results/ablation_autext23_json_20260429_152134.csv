@@ -1,0 +1,39 @@
+experiment,gnn_type,description,test_accuracy,test_f1,best_accuracy,best_f1,val_accuracy,val_f1,status,mlflow_run_id
+gat_base,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GATConv,2c6c5c8c43624fc29c52b71a507113a4
+gat_base,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GATConv,
+gat_hid128,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GATConv,4ee29ffdb6464cb7a5f87c12621d5050
+gat_hid128,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GATConv,
+gat_hid500,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GATConv,958ae932c9af4fccb9a32ff93227d853
+gat_hid500,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GATConv,
+gat_dense128,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GATConv,b1d9ea58a7164093b7244cfa687a8187
+gat_dense128,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GATConv,
+gat_1L,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GATConv,f722b4f9d79a4735aebedb16941e2bf2
+gat_1L,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GATConv,
+gat_3L,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GATConv,daa223dbc1994ff7b888253a0f617cd7
+gat_3L,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GATConv,
+gat_4L,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GATConv,2030c96bdd344510b27e4dc8bd3d49d0
+gat_4L,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GATConv,
+gat_1H,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GATConv,1cd1bc301b9042f9946711e5a0ee0607
+gat_1H,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GATConv,
+gat_3H,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GATConv,74d3a876c8a74ebc9685271b771cf536
+gat_3H,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GATConv,
+gat_4H,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GATConv,173f21cddec242d78f7b7871c6d7dd6e
+gat_4H,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GATConv,
+gat_dr025,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GATConv,a3a2d0ad7ce44ac0b79d84a625ec8d64
+gat_dr025,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GATConv,
+gat_dr075,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GATConv,b007709dbded4646950ca72111dee387
+gat_dr075,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GATConv,
+gat_lr1e4,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GATConv,5bea68f3b91d4cadae3493042a2c9459
+gat_lr1e4,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GATConv,
+gat_ln,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GATConv,8d565dde4204448085d63b07bdcd7bfe
+gat_ln,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GATConv,
+gat_mp1,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GATConv,fe6d127174484d9f9c9f2ad1c2271f3c
+gat_mp1,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GATConv,
+gat_mp3,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GATConv,86cecdd52d094bc8bff6575fc94b060a
+gat_mp3,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GATConv,
+gat_attn,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GATConv,794c23539ec84948aeedbf51d4dd2545
+gat_attn,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GATConv,
+gat_lodo_off,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GATConv,97bfca56d6f845e6a6ff6cd87a5ec61d
+gat_lodo_off,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GATConv,
+trans_use_token_distance,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: Unknown gnn_type: GATConv,d56208df54374775bd2aa412ca58616a
+trans_use_token_distance,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: Unknown gnn_type: GATConv,

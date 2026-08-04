@@ -1,0 +1,39 @@
+experiment,gnn_type,description,test_accuracy,test_f1,best_accuracy,best_f1,val_accuracy,val_f1,status,mlflow_run_id
+gat_base,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,02094d6bd3a448d99a45bb7656a1a9a6
+gat_base,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,
+gat_hid128,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,496e811caafa49f99bcd55ca2c04e4ef
+gat_hid128,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,
+gat_hid500,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,2675311379104226b032485c8748a7ff
+gat_hid500,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,
+gat_dense128,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,63d908fb664640c1a1b1336ff5ac66a3
+gat_dense128,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,
+gat_1L,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,4fff740acaf748beb130616c184aa317
+gat_1L,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,
+gat_3L,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,553f3c42acc04f7980a0df1d916125ef
+gat_3L,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,
+gat_4L,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,960176b96c1045eaad026dd4ec9d6560
+gat_4L,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,
+gat_1H,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,11760aded9824860982372a63e6511d1
+gat_1H,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,
+gat_3H,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,3111a77e3a1149e481941855df497520
+gat_3H,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,
+gat_4H,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,5747b580e6654b3b8167b99fd1e05785
+gat_4H,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,
+gat_dr025,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,fd9690fc9ee24c17a9f8711b4bf4a8b1
+gat_dr025,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,
+gat_dr075,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,0da7474d6a0a4ec1a28e2f9401022473
+gat_dr075,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,
+gat_lr1e4,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,8d25d7f78daf44958bf2d6fbca6b0391
+gat_lr1e4,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,
+gat_ln,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,fdcd5c1e78ab43babebe21e62c1bd1dd
+gat_ln,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,
+gat_mp1,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,150f5c086aea4f538aad949e674b2d7e
+gat_mp1,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,
+gat_mp3,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,57b0cba0f3884e55b9bd4a3146229c7d
+gat_mp3,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,
+gat_attn,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,4486a877f1bd4698b1d174d633641d22
+gat_attn,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,
+gat_lodo_off,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,61e17c85bbe44666a4150fe91baf3d42
+gat_lodo_off,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,
+trans_use_token_distance,GATConv,No description,0.0,0.0,0.0,0.0,0.0,0.0,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,38d2283775ce4deaa9ac16b6af2f7a7f
+trans_use_token_distance,GATConv,,0.0,0.0,0.0,0.0,,,FAILED: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data,

@@ -1,0 +1,146 @@
+{
+  "_comment": "Component ablation for ISG on autext23-s2 (6-class). Each component is removed one at a time (OFAT). Runs with TransformerConv and Hybrid-ISG-GTN.\n\n  Component mapping:\n    ISG POS          -> add_pos_feat          (POS embeddings on nodes)\n    Edge Attr        -> edge_attr              (dep embedding concat into K,V of attention)\n    Token Distance   -> use_token_distance_attn (distance gating on attention scores — only Hybrid)\n    Dep. sintáctica  -> use_edge_bias          (dep relation bias on attention scores — only Hybrid)\n\n  NOTE: 'Sin POS' requires a separate PKL build (add_pos_feat=false changes node features).\n  All other ablations reuse the same PKL.",
+
+  "defaults": {
+    "mlflow_exp_name":        "ISG-Component-Ablation-S2AuText23",
+    "dataset_name":           "autext23_s2",
+    "cut_off_dataset":        "100_100_100",
+    "cuda_num":               0,
+    "build_graph":            false,
+    "graph_type":             "undirected",
+    "lang_model_name":        "microsoft/deberta-v3-base",
+
+    "add_pos_feat":           true,
+    "edge_attr":              true,
+    "use_token_distance_attn": true,
+    "use_edge_bias":          true,
+
+    "add_domain_feat":        false,
+    "reduce_dim_emb":         false,
+    "project_after_concat":   false,
+    "balance_dataset":        true,
+    "max_features":           20000,
+    "min_df":                 3,
+    "max_df":                 1.0,
+    "stop_words":             false,
+    "special_chars":          false,
+
+    "patience":               15,
+    "hidden_gnn_dim":         300,
+    "dense_hidden_gnn_dim":   64,
+    "num_gnn_layers":         2,
+    "heads_gnn":              2,
+    "dropout":                0.5,
+    "lr":                     0.00001,
+    "norm_type":              "batchnorm",
+    "post_mp_layers":         2,
+    "pooling_type":           "mean",
+
+    "leave_out_sources":      true,
+    "use_global_pooling":     false
+  },
+
+  "experiments": [
+
+    {
+      "_comment": "═══════════════════════════════════════════════════════════════",
+      "_comment2": "  BLOQUE 1 — TransformerConv                                  ",
+      "_comment3": "  Token Distance y Dep. Sint. no aplican a GNN estándar.      ",
+      "_comment4": "  Edge Attr y Dep. Sint. son la misma palanca para TConv.     ",
+      "_comment5": "═══════════════════════════════════════════════════════════════"
+    },
+
+    {
+      "_group": "transformerconv",
+      "name": "tconv_isg_completo",
+      "_description": "TransformerConv — ISG Completo: POS=✓ EdgeAttr=✓",
+      "gnn_type": "TransformerConv",
+      "build_graph": true
+    },
+    {
+      "_group": "transformerconv",
+      "name": "tconv_sin_pos",
+      "_description": "TransformerConv — Sin POS: POS=✗ EdgeAttr=✓ | needs new PKL (nopos)",
+      "gnn_type": "TransformerConv",
+      "add_pos_feat": false,
+      "build_graph": true
+    },
+    {
+      "_group": "transformerconv",
+      "name": "tconv_sin_edge_attr",
+      "_description": "TransformerConv — Sin Edge Attr: POS=✓ EdgeAttr=✗",
+      "gnn_type": "TransformerConv",
+      "edge_attr": false
+    },
+    {
+      "_group": "transformerconv",
+      "name": "tconv_sin_token_dist",
+      "_description": "TransformerConv — Sin Token Distance: n/a para TConv, equivale a ISG Completo",
+      "gnn_type": "TransformerConv",
+      "use_token_distance_attn": false
+    },
+    {
+      "_group": "transformerconv",
+      "name": "tconv_sin_dep_sint",
+      "_description": "TransformerConv — Sin Dep. Sint.: para TConv equivale a Sin Edge Attr (POS=✓ EdgeAttr=✗)",
+      "gnn_type": "TransformerConv",
+      "edge_attr": false,
+      "use_edge_bias": false
+    },
+
+    {
+      "_comment": "═══════════════════════════════════════════════════════════════",
+      "_comment2": "  BLOQUE 2 — Hybrid-ISG-GTN                                   ",
+      "_comment3": "  Aquí los 4 componentes son realmente independientes:         ",
+      "_comment3b": "    edge_attr      → dep concat en K,V (contenido del mensaje)",
+      "_comment3c": "    use_edge_bias  → dep bias en scores (ponderación)         ",
+      "_comment3d": "    token_distance → gating por distancia (atención)          ",
+      "_comment4": "═══════════════════════════════════════════════════════════════"
+    },
+
+    {
+      "_group": "hybrid_isg_gtn",
+      "name": "hybrid_isg_completo",
+      "_description": "Hybrid-ISG-GTN — ISG Completo: POS=✓ EdgeAttr=✓ TokenDist=✓ DepSint=✓",
+      "gnn_type": "Hybrid-ISG-GTN",
+      "use_token_distance_attn": true,
+      "use_edge_bias": true
+    },
+    {
+      "_group": "hybrid_isg_gtn",
+      "name": "hybrid_sin_pos",
+      "_description": "Hybrid-ISG-GTN — Sin POS: POS=✗ EdgeAttr=✓ TokenDist=✓ DepSint=✓ | needs new PKL (nopos)",
+      "gnn_type": "Hybrid-ISG-GTN",
+      "add_pos_feat": false,
+      "use_token_distance_attn": true,
+      "use_edge_bias": true,
+      "build_graph": true
+    },
+    {
+      "_group": "hybrid_isg_gtn",
+      "name": "hybrid_sin_edge_attr",
+      "_description": "Hybrid-ISG-GTN — Sin Edge Attr: POS=✓ EdgeAttr=✗ TokenDist=✓ DepSint=✗ (no hay dep embedding)",
+      "gnn_type": "Hybrid-ISG-GTN",
+      "edge_attr": false,
+      "use_edge_bias": false,
+      "use_token_distance_attn": true
+    },
+    {
+      "_group": "hybrid_isg_gtn",
+      "name": "hybrid_sin_token_dist",
+      "_description": "Hybrid-ISG-GTN — Sin Token Distance: POS=✓ EdgeAttr=✓ TokenDist=✗ DepSint=✓",
+      "gnn_type": "Hybrid-ISG-GTN",
+      "use_token_distance_attn": false,
+      "use_edge_bias": true
+    },
+    {
+      "_group": "hybrid_isg_gtn",
+      "name": "hybrid_sin_dep_sint",
+      "_description": "Hybrid-ISG-GTN — Sin Dep. Sint.: POS=✓ EdgeAttr=✓ TokenDist=✓ DepSint=✗ (dep bias desactivado)",
+      "gnn_type": "Hybrid-ISG-GTN",
+      "use_token_distance_attn": true,
+      "use_edge_bias": false
+    }
+
+  ]
+}

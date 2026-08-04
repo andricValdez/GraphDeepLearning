@@ -1,0 +1,361 @@
+
+================================================================================
+Experiment: gat_base
+Error: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 336, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 198, in _run_single_experiment
+    standard_main(**filtered)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph.py", line 1312, in main
+    data = utils.load_data(file_name_data, path=f'{output_dir}/', format_file='.pkl', compress=False)
+  File "/home/avaldez/projects/GraphDeepLearning/src/utils.py", line 82, in load_data
+    return joblib.load(path_file)
+  File "/home/avaldez/envs/gnn/lib/python3.10/site-packages/joblib/numpy_pickle.py", line 650, in load
+    with open(filename, 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+
+================================================================================
+Experiment: gat_hid128
+Error: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 336, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 198, in _run_single_experiment
+    standard_main(**filtered)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph.py", line 1312, in main
+    data = utils.load_data(file_name_data, path=f'{output_dir}/', format_file='.pkl', compress=False)
+  File "/home/avaldez/projects/GraphDeepLearning/src/utils.py", line 82, in load_data
+    return joblib.load(path_file)
+  File "/home/avaldez/envs/gnn/lib/python3.10/site-packages/joblib/numpy_pickle.py", line 650, in load
+    with open(filename, 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+
+================================================================================
+Experiment: gat_hid500
+Error: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 336, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 198, in _run_single_experiment
+    standard_main(**filtered)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph.py", line 1312, in main
+    data = utils.load_data(file_name_data, path=f'{output_dir}/', format_file='.pkl', compress=False)
+  File "/home/avaldez/projects/GraphDeepLearning/src/utils.py", line 82, in load_data
+    return joblib.load(path_file)
+  File "/home/avaldez/envs/gnn/lib/python3.10/site-packages/joblib/numpy_pickle.py", line 650, in load
+    with open(filename, 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+
+================================================================================
+Experiment: gat_dense128
+Error: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 336, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 198, in _run_single_experiment
+    standard_main(**filtered)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph.py", line 1312, in main
+    data = utils.load_data(file_name_data, path=f'{output_dir}/', format_file='.pkl', compress=False)
+  File "/home/avaldez/projects/GraphDeepLearning/src/utils.py", line 82, in load_data
+    return joblib.load(path_file)
+  File "/home/avaldez/envs/gnn/lib/python3.10/site-packages/joblib/numpy_pickle.py", line 650, in load
+    with open(filename, 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+
+================================================================================
+Experiment: gat_1L
+Error: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 336, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 198, in _run_single_experiment
+    standard_main(**filtered)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph.py", line 1312, in main
+    data = utils.load_data(file_name_data, path=f'{output_dir}/', format_file='.pkl', compress=False)
+  File "/home/avaldez/projects/GraphDeepLearning/src/utils.py", line 82, in load_data
+    return joblib.load(path_file)
+  File "/home/avaldez/envs/gnn/lib/python3.10/site-packages/joblib/numpy_pickle.py", line 650, in load
+    with open(filename, 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+
+================================================================================
+Experiment: gat_3L
+Error: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 336, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 198, in _run_single_experiment
+    standard_main(**filtered)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph.py", line 1312, in main
+    data = utils.load_data(file_name_data, path=f'{output_dir}/', format_file='.pkl', compress=False)
+  File "/home/avaldez/projects/GraphDeepLearning/src/utils.py", line 82, in load_data
+    return joblib.load(path_file)
+  File "/home/avaldez/envs/gnn/lib/python3.10/site-packages/joblib/numpy_pickle.py", line 650, in load
+    with open(filename, 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+
+================================================================================
+Experiment: gat_4L
+Error: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 336, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 198, in _run_single_experiment
+    standard_main(**filtered)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph.py", line 1312, in main
+    data = utils.load_data(file_name_data, path=f'{output_dir}/', format_file='.pkl', compress=False)
+  File "/home/avaldez/projects/GraphDeepLearning/src/utils.py", line 82, in load_data
+    return joblib.load(path_file)
+  File "/home/avaldez/envs/gnn/lib/python3.10/site-packages/joblib/numpy_pickle.py", line 650, in load
+    with open(filename, 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+
+================================================================================
+Experiment: gat_1H
+Error: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 336, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 198, in _run_single_experiment
+    standard_main(**filtered)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph.py", line 1312, in main
+    data = utils.load_data(file_name_data, path=f'{output_dir}/', format_file='.pkl', compress=False)
+  File "/home/avaldez/projects/GraphDeepLearning/src/utils.py", line 82, in load_data
+    return joblib.load(path_file)
+  File "/home/avaldez/envs/gnn/lib/python3.10/site-packages/joblib/numpy_pickle.py", line 650, in load
+    with open(filename, 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+
+================================================================================
+Experiment: gat_3H
+Error: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 336, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 198, in _run_single_experiment
+    standard_main(**filtered)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph.py", line 1312, in main
+    data = utils.load_data(file_name_data, path=f'{output_dir}/', format_file='.pkl', compress=False)
+  File "/home/avaldez/projects/GraphDeepLearning/src/utils.py", line 82, in load_data
+    return joblib.load(path_file)
+  File "/home/avaldez/envs/gnn/lib/python3.10/site-packages/joblib/numpy_pickle.py", line 650, in load
+    with open(filename, 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+
+================================================================================
+Experiment: gat_4H
+Error: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 336, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 198, in _run_single_experiment
+    standard_main(**filtered)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph.py", line 1312, in main
+    data = utils.load_data(file_name_data, path=f'{output_dir}/', format_file='.pkl', compress=False)
+  File "/home/avaldez/projects/GraphDeepLearning/src/utils.py", line 82, in load_data
+    return joblib.load(path_file)
+  File "/home/avaldez/envs/gnn/lib/python3.10/site-packages/joblib/numpy_pickle.py", line 650, in load
+    with open(filename, 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+
+================================================================================
+Experiment: gat_dr025
+Error: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 336, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 198, in _run_single_experiment
+    standard_main(**filtered)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph.py", line 1312, in main
+    data = utils.load_data(file_name_data, path=f'{output_dir}/', format_file='.pkl', compress=False)
+  File "/home/avaldez/projects/GraphDeepLearning/src/utils.py", line 82, in load_data
+    return joblib.load(path_file)
+  File "/home/avaldez/envs/gnn/lib/python3.10/site-packages/joblib/numpy_pickle.py", line 650, in load
+    with open(filename, 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+
+================================================================================
+Experiment: gat_dr075
+Error: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 336, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 198, in _run_single_experiment
+    standard_main(**filtered)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph.py", line 1312, in main
+    data = utils.load_data(file_name_data, path=f'{output_dir}/', format_file='.pkl', compress=False)
+  File "/home/avaldez/projects/GraphDeepLearning/src/utils.py", line 82, in load_data
+    return joblib.load(path_file)
+  File "/home/avaldez/envs/gnn/lib/python3.10/site-packages/joblib/numpy_pickle.py", line 650, in load
+    with open(filename, 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+
+================================================================================
+Experiment: gat_lr1e4
+Error: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 336, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 198, in _run_single_experiment
+    standard_main(**filtered)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph.py", line 1312, in main
+    data = utils.load_data(file_name_data, path=f'{output_dir}/', format_file='.pkl', compress=False)
+  File "/home/avaldez/projects/GraphDeepLearning/src/utils.py", line 82, in load_data
+    return joblib.load(path_file)
+  File "/home/avaldez/envs/gnn/lib/python3.10/site-packages/joblib/numpy_pickle.py", line 650, in load
+    with open(filename, 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+
+================================================================================
+Experiment: gat_ln
+Error: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 336, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 198, in _run_single_experiment
+    standard_main(**filtered)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph.py", line 1312, in main
+    data = utils.load_data(file_name_data, path=f'{output_dir}/', format_file='.pkl', compress=False)
+  File "/home/avaldez/projects/GraphDeepLearning/src/utils.py", line 82, in load_data
+    return joblib.load(path_file)
+  File "/home/avaldez/envs/gnn/lib/python3.10/site-packages/joblib/numpy_pickle.py", line 650, in load
+    with open(filename, 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+
+================================================================================
+Experiment: gat_mp1
+Error: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 336, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 198, in _run_single_experiment
+    standard_main(**filtered)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph.py", line 1312, in main
+    data = utils.load_data(file_name_data, path=f'{output_dir}/', format_file='.pkl', compress=False)
+  File "/home/avaldez/projects/GraphDeepLearning/src/utils.py", line 82, in load_data
+    return joblib.load(path_file)
+  File "/home/avaldez/envs/gnn/lib/python3.10/site-packages/joblib/numpy_pickle.py", line 650, in load
+    with open(filename, 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+
+================================================================================
+Experiment: gat_mp3
+Error: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 336, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 198, in _run_single_experiment
+    standard_main(**filtered)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph.py", line 1312, in main
+    data = utils.load_data(file_name_data, path=f'{output_dir}/', format_file='.pkl', compress=False)
+  File "/home/avaldez/projects/GraphDeepLearning/src/utils.py", line 82, in load_data
+    return joblib.load(path_file)
+  File "/home/avaldez/envs/gnn/lib/python3.10/site-packages/joblib/numpy_pickle.py", line 650, in load
+    with open(filename, 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+
+================================================================================
+Experiment: gat_attn
+Error: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 336, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 198, in _run_single_experiment
+    standard_main(**filtered)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph.py", line 1312, in main
+    data = utils.load_data(file_name_data, path=f'{output_dir}/', format_file='.pkl', compress=False)
+  File "/home/avaldez/projects/GraphDeepLearning/src/utils.py", line 82, in load_data
+    return joblib.load(path_file)
+  File "/home/avaldez/envs/gnn/lib/python3.10/site-packages/joblib/numpy_pickle.py", line 650, in load
+    with open(filename, 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+
+================================================================================
+Experiment: gat_lodo_off
+Error: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 336, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 198, in _run_single_experiment
+    standard_main(**filtered)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph.py", line 1312, in main
+    data = utils.load_data(file_name_data, path=f'{output_dir}/', format_file='.pkl', compress=False)
+  File "/home/avaldez/projects/GraphDeepLearning/src/utils.py", line 82, in load_data
+    return joblib.load(path_file)
+  File "/home/avaldez/envs/gnn/lib/python3.10/site-packages/joblib/numpy_pickle.py", line 650, in load
+    with open(filename, 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+
+================================================================================
+Experiment: trans_use_token_distance
+Error: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 336, in run_json
+    self._run_single_experiment(exp_name, config)
+  File "/home/avaldez/projects/GraphDeepLearning/src/run_ablation_study.py", line 198, in _run_single_experiment
+    standard_main(**filtered)
+  File "/home/avaldez/projects/GraphDeepLearning/src/test_isg_graph.py", line 1312, in main
+    data = utils.load_data(file_name_data, path=f'{output_dir}/', format_file='.pkl', compress=False)
+  File "/home/avaldez/projects/GraphDeepLearning/src/utils.py", line 82, in load_data
+    return joblib.load(path_file)
+  File "/home/avaldez/envs/gnn/lib/python3.10/site-packages/joblib/numpy_pickle.py", line 650, in load
+    with open(filename, 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: '/media/discoexterno/andric/data/experiments/isg_graph/isg_data_autext23_100_100_100perc.pkl'
+

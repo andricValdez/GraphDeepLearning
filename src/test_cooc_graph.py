@@ -1,664 +1,862 @@
-
-import torch
-import numpy as np
-from torch_geometric.data import Data, DataLoader
-from torch.nn import Linear
-from torch_geometric.nn import GCNConv, global_mean_pool
-import torch.nn.functional as F
-from gensim.models import Word2Vec
-from itertools import combinations
-import re
-import numpy as np
-import pandas as pd
-from tqdm import tqdm
-import torch
-import os
-import scipy as sp
-from scipy.sparse import coo_array
-from gensim.models import Word2Vec
-from gensim.models.doc2vec import Doc2Vec, TaggedDocument
-import gensim
-from nltk.tokenize import sent_tokenize, word_tokenize
-import warnings
-from sklearn.utils import shuffle
-from collections import Counter, defaultdict
-from datasets import load_dataset
-import joblib
-from joblib import Parallel, delayed
-from sklearn.model_selection import train_test_split
-import networkx as nx
-import networkx
-import sys, traceback, time
-from joblib import Parallel, delayed
-import warnings
-import nltk
-import re, string, math
-import codecs
-import multiprocessing
-from spacy.tokens import Doc
-import spacy
-from spacy.lang.xx import MultiLanguage
-from spacy.cli import download
-from spacy.tokenizer import Tokenizer
-from spacy.util import compile_prefix_regex, compile_infix_regex, compile_suffix_regex
-from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
-import itertools
-from math import log
-from sklearn.metrics import accuracy_score, f1_score
-from transformers import logging
-from transformers import AutoTokenizer, AutoModel, Trainer, AutoModelForSequenceClassification, TrainingArguments
-from transformers import BertForSequenceClassification, RobertaForSequenceClassification
-from transformers import TrainingArguments, Trainer
-from transformers import get_scheduler
-from datasets import load_dataset, Dataset, DatasetDict
-from sklearn.metrics.pairwise import cosine_similarity
-import matplotlib.pyplot as plt
-from sklearn.manifold import TSNE
-import os
-import sys
-import joblib
-import time
-import numpy as np
-import pandas as pd
-import logging
-import traceback
-import math
-from tqdm import tqdm
 import torch
 import torch.nn as nn
-import networkx as nx
-import scipy as sp
-import scipy.sparse as sp
-import gensim
+import torch.nn.functional as F
+import numpy as np
+import re
+import sys
+import os
 import copy
-from tqdm import tqdm
-import random
-from scipy.sparse import coo_array
-import gc
-import glob
-import torch.nn.functional as F
-from torch_geometric.data import DataLoader, Data
-from collections import OrderedDict
+import time
+import logging
 import warnings
-from transformers import logging as transform_loggin
-import torch.nn.functional as F
-from torch_geometric.nn import GCNConv, GATConv, TransformerConv, TopKPooling, GraphConv, SAGPooling, GENConv, GINConv
-from torch_geometric.nn import global_mean_pool, global_max_pool, global_add_pool
-from torch_geometric.datasets import Planetoid
-from torch_geometric.transforms import NormalizeFeatures
-from torch.nn import Linear, BatchNorm1d, ModuleList, LayerNorm
-import torch
-torch.cuda.is_available()
+import json
+import argparse
+import inspect
+import math
+from itertools import combinations
+from collections import Counter, defaultdict
+from tqdm import tqdm
 
-from nltk.corpus import stopwords
-from nltk.stem import PorterStemmer
-import contractions
-nltk.download('stopwords')
-nltk.download('punkt_tab')
+import nltk
+from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
+from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
+from transformers import AutoTokenizer, AutoModel
+
+from torch_geometric.data import Data, DataLoader
+from torch_geometric.nn import GCNConv, GATConv, TransformerConv
+from torch_geometric.nn import global_mean_pool
+
+from joblib import Parallel, delayed
+
+import mlflow
+import pandas as pd
 
 import test_utils
 import utils
 
-#************************************* CONFIGS
-logging.basicConfig(stream=sys.stdout, level=logging.INFO, format="%(asctime)s; - %(levelname)s; - %(message)s")
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+# ─── Config ───────────────────────────────────────────────────────────────────
 warnings.filterwarnings("ignore")
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+log_file_path = "training_cooc.log"
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s; - %(levelname)s; - %(message)s',
+    handlers=[
+        logging.FileHandler(log_file_path),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+mlflow.set_tracking_uri("/home/avaldez/projects/GraphDeepLearning/mlruns")
+
+try:
+    nltk.data.find('tokenizers/punkt')
+    nltk.data.find('corpora/stopwords')
+except LookupError:
+    nltk.download('punkt')
+    nltk.download('stopwords')
 
 
+# ─── Helpers ──────────────────────────────────────────────────────────────────
+
+def canonicalize_dataset_name(dataset_name):
+    aliases = {'autext_s2': 'autext23_s2'}
+    return aliases.get(dataset_name, dataset_name)
+
+
+def get_main_kwargs(config: dict) -> dict:
+    accepted = inspect.signature(main).parameters
+    return {k: v for k, v in config.items() if k in accepted}
+
+
+def configure_mlflow_run(config: dict, dataset_name: str):
+    mlflow.set_experiment(config.get("mlflow_exp_name", "CoOc-Graph"))
+    name = config.get("name", "manual")
+    cutoff = config["cut_off_dataset"]
+    run_name = f"{name}_{dataset_name}_{cutoff}perc"
+    return {
+        "mlflow.note.content": f"CoOc GNN | dataset={dataset_name} cutoff={cutoff}",
+        "mlflow.source.type": "LOCAL",
+        "mlflow.runName": run_name,
+    }
+
+
+def infer_num_classes(*label_lists):
+    labels = sorted({int(l) for ll in label_lists for l in ll})
+    return len(labels), labels
+
+
+def compute_class_weights(data_list, num_classes, device):
+    targets = torch.tensor([int(d.y.item()) for d in data_list], dtype=torch.long)
+    counts = torch.bincount(targets, minlength=num_classes).float()
+    weights = targets.numel() / (num_classes * counts.clamp(min=1.0))
+    return weights.to(device), counts
+
+
+# ─── Graph improvements: PMI and TF-IDF ───────────────────────────────────────
+
+def compute_pmi(texts_tokenized: list, vocab: set, window_size: int,
+                min_count: int = 5) -> dict:
+    """
+    Compute Normalized PMI (NPMI) for all word pairs that co-occur within
+    a sliding window across the corpus. Returns {(w1,w2): npmi} for pairs
+    with positive association (npmi > 0).
+
+    NPMI is bounded in [-1, 1]: 1 means always co-occurring, 0 means
+    independent, -1 means never co-occurring. Only pairs > 0 are returned.
+    """
+    word_count: Counter = Counter()
+    pair_count: Counter = Counter()
+
+    for tokens in tqdm(texts_tokenized, desc="Computing PMI", leave=False):
+        valid = [t for t in tokens if t in vocab]
+        for i, w1 in enumerate(valid):
+            word_count[w1] += 1
+            for w2 in valid[i + 1: i + window_size + 1]:
+                if w2 != w1:
+                    pair_count[tuple(sorted([w1, w2]))] += 1
+
+    total_w = max(sum(word_count.values()), 1)
+    total_p = max(sum(pair_count.values()), 1)
+
+    pmi_scores: dict = {}
+    for (w1, w2), cnt in pair_count.items():
+        if cnt < min_count:
+            continue
+        p_w1   = word_count[w1] / total_w
+        p_w2   = word_count[w2] / total_w
+        p_pair = cnt / total_p
+        denom  = p_w1 * p_w2
+        if denom <= 0 or p_pair <= 0:
+            continue
+        pmi  = math.log2(p_pair / denom)
+        npmi = pmi / (-math.log2(p_pair))   # normalize to [-1, 1]
+        if npmi > 0:
+            pmi_scores[(w1, w2)] = npmi
+            pmi_scores[(w2, w1)] = npmi
+
+    logger.info(f"PMI computed: {len(pmi_scores) // 2} positive pairs")
+    return pmi_scores
+
+
+def compute_tfidf_scores(texts_norm: list, vocab: set) -> list:
+    """
+    Fit a TF-IDF vectorizer (with sublinear_tf) over all texts using the
+    graph vocabulary, and return a list of per-document dicts
+    {word: tfidf_score}.
+    """
+    vec = TfidfVectorizer(vocabulary=sorted(vocab), sublinear_tf=True)
+    mat = vec.fit_transform(texts_norm)
+    feat_names = vec.get_feature_names_out()
+
+    doc_tfidf = []
+    for i in range(mat.shape[0]):
+        row = mat.getrow(i)
+        doc_tfidf.append({feat_names[j]: float(row[0, j]) for j in row.indices})
+    return doc_tfidf
+
+
+# ─── Model ────────────────────────────────────────────────────────────────────
 
 class EarlyStopper:
-    def __init__(self, patience=1, min_delta=0):
+    def __init__(self, patience=1, min_delta=0, mode='max'):
         self.patience = patience
         self.min_delta = min_delta
+        self.mode = mode
         self.counter = 0
-        self.min_validation_loss = float('inf')
+        self.best_score = float('-inf') if mode == 'max' else float('inf')
 
-    def early_stop(self, validation_loss):
-        #print(validation_loss, self.min_validation_loss, self.counter)
-        if validation_loss <= self.min_validation_loss:
-            self.min_validation_loss = validation_loss
+    def early_stop(self, score):
+        improved = (score >= self.best_score + self.min_delta) if self.mode == 'max' \
+                   else (score <= self.best_score - self.min_delta)
+        if improved:
+            self.best_score = score
             self.counter = 0
-        elif validation_loss > (self.min_validation_loss + self.min_delta):
+        else:
             self.counter += 1
             if self.counter >= self.patience:
                 return True
         return False
 
+
 class GNN(nn.Module):
-    def __init__(self, input_dim, hidden_dim, dense_hidden_dim, output_dim, dropout, num_layers, gnn_type='GCNConv', heads=1, task='node'):
-        super(GNN, self).__init__()
-        self.task = task
-        self.heads = heads
+    def __init__(self, input_dim, hidden_dim, dense_hidden_dim, output_dim,
+                 dropout, num_layers, gnn_type='GCNConv', heads=1,
+                 use_edge_attr=False, edge_attr_dim=1):
+        super().__init__()
         self.gnn_type = gnn_type
-        self.conv1 = self.build_conv_model(input_dim, hidden_dim, self.heads)
-        self.norm1 = nn.LayerNorm(hidden_dim * heads)
-        self.convs = nn.ModuleList()
-        #self.convs.append(self.build_conv_model(input_dim, hidden_dim, self.heads))
-        self.lns = nn.ModuleList()
-        for l in range(num_layers):
-            self.convs.append(self.build_conv_model(hidden_dim * heads, hidden_dim, self.heads))
-            self.lns.append(nn.LayerNorm(hidden_dim * heads))
-
-        # Post-message-passing
-        self.post_mp = nn.Sequential(
-            nn.Linear(hidden_dim * heads, dense_hidden_dim),
-            nn.Linear(dense_hidden_dim, int(dense_hidden_dim // 2)),
-            nn.Linear(int(dense_hidden_dim // 2), output_dim),
-            #nn.Linear(int(dense_hidden_dim // 4), output_dim)
-        )
-
+        self.heads = heads if gnn_type != 'GCNConv' else 1
         self.dropout = dropout
         self.num_layers = num_layers
+        self.use_edge_attr = use_edge_attr
+        self.edge_attr_dim = edge_attr_dim
 
-    def build_conv_model(self, input_dim, hidden_dim, heads):
+        out1 = hidden_dim * self.heads
+        self.conv1 = self._build_conv(input_dim, hidden_dim)
+        self.norm1 = nn.LayerNorm(out1)
+
+        self.convs = nn.ModuleList([self._build_conv(out1, hidden_dim) for _ in range(num_layers)])
+        self.norms = nn.ModuleList([nn.LayerNorm(out1) for _ in range(num_layers)])
+
+        self.post_mp = nn.Sequential(
+            nn.Linear(out1, dense_hidden_dim), nn.ReLU(), nn.Dropout(dropout),
+            nn.Linear(dense_hidden_dim, dense_hidden_dim // 2), nn.ReLU(), nn.Dropout(dropout),
+            nn.Linear(dense_hidden_dim // 2, output_dim),
+        )
+
+    def _build_conv(self, in_dim, out_dim):
         if self.gnn_type == 'GCNConv':
-            return GCNConv(input_dim, hidden_dim)
+            return GCNConv(in_dim, out_dim)
         elif self.gnn_type == 'GATConv':
-            return GATConv(input_dim, hidden_dim, heads=heads)
+            if self.use_edge_attr:
+                return GATConv(in_dim, out_dim, heads=self.heads, edge_dim=self.edge_attr_dim)
+            return GATConv(in_dim, out_dim, heads=self.heads)
         elif self.gnn_type == 'TransformerConv':
-            return TransformerConv(input_dim, hidden_dim, heads=heads)
+            if self.use_edge_attr:
+                return TransformerConv(in_dim, out_dim, heads=self.heads, edge_dim=self.edge_attr_dim)
+            return TransformerConv(in_dim, out_dim, heads=self.heads)
+        raise ValueError(f"Unsupported gnn_type: {self.gnn_type}")
 
-    def forward(self, x, edge_index, edge_attr, batch):
-        x = self.conv1(x, edge_index)
-        emb = x
-        x = F.relu(x)
-        x = self.norm1(x)
+    def _apply_conv(self, conv, x, edge_index, edge_attr):
+        if self.use_edge_attr and edge_attr is not None:
+            if self.gnn_type == 'GCNConv':
+                return conv(x, edge_index, edge_attr.squeeze(1))  # GCNConv takes 1D edge_weight
+            return conv(x, edge_index, edge_attr)
+        return conv(x, edge_index)
+
+    def get_graph_embedding(self, x, edge_index, edge_attr=None, batch=None):
+        x = F.relu(self.norm1(self._apply_conv(self.conv1, x, edge_index, edge_attr)))
         x = F.dropout(x, p=self.dropout, training=self.training)
-
-        for i in range(self.num_layers):
-            x = self.convs[i](x, edge_index)
-            emb = x
-            x = F.relu(x)
-            x = self.lns[i](x)
+        for conv, norm in zip(self.convs, self.norms):
+            x = F.relu(norm(self._apply_conv(conv, x, edge_index, edge_attr)))
             x = F.dropout(x, p=self.dropout, training=self.training)
+        return global_mean_pool(x, batch)
 
-        if self.task == 'graph':
-            x = global_mean_pool(x, batch)
+    def forward(self, x, edge_index, edge_attr=None, batch=None):
+        return self.post_mp(self.get_graph_embedding(x, edge_index, edge_attr, batch))
 
-        x = self.post_mp(x)
-        # F.log_softmax(x, dim=1)
-        # self.sigmoid(x)
-        return emb, None, F.log_softmax(x, dim=1)
 
-def train_cooc(model, loader, device, optimizer, criterion):
-        model.train()
-        train_loss = 0.0
-        for data in loader:
-            data = data.to(device)
-            optimizer.zero_grad()
-            emb, _, out = model(data.x, data.edge_index, None, data.batch)
-            loss = criterion(out, data.y)
-            loss.backward()
-            optimizer.step()
-            train_loss += loss.item()
-        return train_loss / len(loader)
+# ─── Training / Evaluation ────────────────────────────────────────────────────
 
-def test_cooc(loader, model, device, criterion):
-    model.eval()
-    test_loss = 0.0
-    correct = 0
-    all_preds = []
-    all_labels = []
+def train_epoch(model, loader, device, optimizer, criterion):
+    model.train()
+    total_loss = 0.0
     for data in loader:
         data = data.to(device)
-        with torch.no_grad():
-            emb, _, out = model(data.x, data.edge_index, None, data.batch)
-        pred = out.argmax(dim=1)
-        all_preds.extend(pred.cpu().numpy())
-        all_labels.extend(data.y.cpu().numpy())
-        correct += int((pred == data.y).sum())
+        optimizer.zero_grad()
+        edge_attr = data.edge_attr if hasattr(data, 'edge_attr') and data.edge_attr is not None else None
+        out = model(data.x, data.edge_index, edge_attr, data.batch)
         loss = criterion(out, data.y)
-        test_loss += loss.item()
+        loss.backward()
+        optimizer.step()
+        total_loss += loss.item()
+    return total_loss / len(loader)
 
-    f1_macro = f1_score(all_labels, all_preds, average='macro')
-    accuracy = correct / len(loader.dataset)
-    return accuracy, f1_macro, test_loss / len(loader)
 
-def extract_doc_edges(text_tokenized, label, word_features, vocab, window_size):
-    #def extract_doc_edges(text_tokenized, label, word_features, word_to_index, vocab, window_size):
-    try:
-        # Get unique words in the document
-        unique_words = list(set(text_tokenized))
-        unique_words = [word for word in unique_words if (word in vocab and word in word_features.keys())]  # Filter out OOV words
-        #unique_words = [word for word in unique_words if (word in vocab)]  # Filter out OOV words
-        #print("\n unique_words: ", len(unique_words), unique_words)
-
-        # Create node features for this graph (only words in the document)
-        #node_features = torch.stack([word_features[word_to_index[word]] for word in unique_words])
-        node_features = torch.stack([word_features[word] for word in unique_words])
-
-        # Create a local word-to-index mapping for this graph
-        local_word_to_index = {word: idx for idx, word in enumerate(unique_words)}
-        #print(local_word_to_index)
-
-        # Create word-word edges (co-occurrence within a window size)
-        word_word_edges = set()
-        for i in range(len(text_tokenized)):
-            window = text_tokenized[i:i + window_size + 1]
-            for word1, word2 in combinations(window, 2):
-                if word1 in local_word_to_index and word2 in local_word_to_index:
-                    word1_id = local_word_to_index[word1]
-                    word2_id = local_word_to_index[word2]
-                    word_word_edges.add((word1_id, word2_id))
-                    word_word_edges.add((word2_id, word1_id))
-
-        # Combine all edges
-        edges = torch.tensor(list(word_word_edges), dtype=torch.long).t()
-        # Create the PyG Data object
-        data = Data(x=node_features, edge_index=edges, y=label, unique_words=unique_words)
-        return data
-    except Exception as e:
-        print('Error: %s', str(e))
-
-def extract_doc_edges2(text_tokenized, label, word_features, word_to_index, vocab, window_size):
-    try:
-        # Get unique words in the document
-        unique_words = list(set(text_tokenized))
-        unique_words = [word for word in unique_words if (word in vocab)]  # Filter out OOV words
-        #print("\n unique_words: ", len(unique_words), unique_words)
-
-        # Create node features for this graph (only words in the document)
-        #node_features = torch.stack([word_features[word_to_index[word]] for word in unique_words])
-
-        # Create a local word-to-index mapping for this graph
-        local_word_to_index = {word: idx for idx, word in enumerate(unique_words)}
-        #print(local_word_to_index)
-
-        # Create word-word edges (co-occurrence within a window size)
-        word_word_edges = set()
-        for i in range(len(text_tokenized)):
-            window = text_tokenized[i:i + window_size + 1]
-            for word1, word2 in combinations(window, 2):
-                if word1 in local_word_to_index and word2 in local_word_to_index:
-                    word1_id = local_word_to_index[word1]
-                    word2_id = local_word_to_index[word2]
-                    word_word_edges.add((word1_id, word2_id))
-                    word_word_edges.add((word2_id, word1_id))
-
-        # Combine all edges
-        edges = torch.tensor(list(word_word_edges), dtype=torch.long).t()
-        # Create the PyG Data object
-        data = Data(x=[], edge_index=edges, y=label, unique_words=unique_words)
-        return data
-    except Exception as e:
-        print('Error: %s', str(e))
-
-def extract_node_features(data, word_features, word_to_index): 
-    try:   
-        #def extract_node_features(data, word_features):
-        # Create node features for this graph (only words in the document)
-        node_features = torch.stack([word_features[word_to_index[word]] for word in data.unique_words])
-        #node_features = torch.stack([word_features['tokens'][word] for word in data.unique_words])
-
-        # set node_features for documents
-        data.x = node_features
-        return data
-    except Exception as e:
-        print('Error: %s', str(e))
-
-def get_word_embeddings(word, tokenizer, language_model, device):
-    # Tokenize the word and convert to tensor
-    inputs = tokenizer(word, return_tensors='pt', truncation=True, padding=True).to(device)
-    # Get BERT embeddings
+def evaluate(model, loader, device, criterion):
+    model.eval()
+    total_loss = 0.0
+    all_preds, all_labels = [], []
     with torch.no_grad():
-        outputs = language_model(**inputs)
-    # Use the embeddings from the last hidden state (CLS token or average pooling)
-    word_embedding = outputs.last_hidden_state.mean(dim=1).squeeze().cpu().numpy()
-    return word_embedding
+        for data in loader:
+            data = data.to(device)
+            edge_attr = data.edge_attr if hasattr(data, 'edge_attr') and data.edge_attr is not None else None
+            out = model(data.x, data.edge_index, edge_attr, data.batch)
+            total_loss += criterion(out, data.y).item()
+            all_preds.extend(out.argmax(dim=1).cpu().numpy())
+            all_labels.extend(data.y.cpu().numpy())
+    f1  = f1_score(all_labels, all_preds, average='macro')
+    acc = accuracy_score(all_labels, all_preds)
+    return f1, acc, total_loss / len(loader), all_preds, all_labels
 
-def get_word_embeddings2(texts_set, texts_tokenized, tokenizer, language_model, vocab, device, set_corpus='train', not_found_tokens='avg'):
-    doc_words_embeddings_dict = {}
 
-    for idx, text in enumerate(tqdm(texts_set, desc=f"Extracting {set_corpus} word embeddings")): # hetero
-        #for idx, text_tokens in enumerate(tqdm(texts_tokenized, desc=f"Extracting {set_corpus} word embeddings")): # hetero
-        #text = ' '.join(list(set(vocab) & set(text_tokens)))
+# ─── Graph Construction ───────────────────────────────────────────────────────
 
-        doc_tokesn_freq = defaultdict(int)
-        doc_words_embeddings_dict[idx] = {'tokens': {}, 'not_found_tokens': []}
-        try:
-            encoded_text = tokenizer.encode_plus(text, return_tensors="pt", padding=True, truncation=True)
-            encoded_text.to(device)
-            with torch.no_grad():
-                outputs_model = language_model(**encoded_text, output_hidden_states=True)
-            last_hidden_state = outputs_model.hidden_states[-1]
+def normalize_text_corpus(texts, special_chars=False, stop_words=False, set_name='train'):
+    tokenize_pattern = r"[A-Z]{2,}(?![a-z])|[A-Z][a-z]+(?=[A-Z])|[\'\w\-]+"
+    texts_norm, tokenized = [], []
+    for text in tqdm(texts, desc=f"Normalizing {set_name}"):
+        norm = test_utils.text_normalize(text, special_chars, stop_words)
+        texts_norm.append(norm)
+        tokenized.append(re.findall(tokenize_pattern, norm))
+    return texts_norm, tokenized
 
-            for i in range(0, len(last_hidden_state)):
-                raw_tokens = [tokenizer.decode([token_id]) for token_id in encoded_text['input_ids'][i]]
-                for token, embedding in zip(raw_tokens, last_hidden_state[i]):
-                    token = str(token).strip()
-                    if token not in vocab:
-                        continue
-                    doc_tokesn_freq[token] += 1
-                    current_emb = embedding.cpu().detach().numpy().tolist()
-                    if token not in doc_words_embeddings_dict[idx]['tokens'].keys():
-                        doc_words_embeddings_dict[idx]['tokens'][token] = current_emb
-                    else:
-                        doc_words_embeddings_dict[idx]['tokens'][token] = np.add.reduce([doc_words_embeddings_dict[idx]['tokens'][token], current_emb])
-            for token, freq in doc_tokesn_freq.items():
-                doc_words_embeddings_dict[idx]['tokens'][token] = torch.tensor(np.divide(doc_words_embeddings_dict[idx]['tokens'][token], freq).tolist(), dtype=torch.float)
-        except Exception as e:
-            print('Error: %s', str(e))
 
-    for idx, doc_tokens in enumerate(tqdm(texts_tokenized)): 
-        try:
-            # get tokens that were not found in doc_words_embeddings_dict according to doc_tokens AND only exist in vocab
-            merge_tokens = list(set(vocab) & (set(doc_tokens) - set(doc_words_embeddings_dict[idx]['tokens'].keys())))
-            for token in merge_tokens:
-            #for token in doc_tokens: 
-                not_found_tokens_dict = {}
-                #if (token in vocab) and (token not in doc_words_embeddings_dict[idx]['tokens']):
-                if not_found_tokens == 'ones':
-                    doc_words_embeddings_dict[idx]['tokens'][token] = torch.tensor(np.ones(language_model.config.hidden_size), dtype=torch.float)
-                elif not_found_tokens == 'zeros':
-                    doc_words_embeddings_dict[idx]['tokens'][token] = torch.tensor(np.zeros(language_model.config.hidden_size), dtype=torch.float)
-                else: # avg
-                    node_tokens = tokenizer.encode_plus(token, return_tensors="pt", padding=True, truncation=True)
-                    raw_tokens = [tokenizer.decode([token_id]) for token_id in node_tokens['input_ids'][0]]
-                    not_found_tokens_dict[token] = raw_tokens[1:-1]
-                    avg_emb, emb_list = [], []
-                    for token, subtokens in not_found_tokens_dict.items():
-                        if token in doc_words_embeddings_dict[idx]['tokens']:
-                            continue
-                        for subtoken in subtokens: 
-                            if subtoken in doc_words_embeddings_dict[idx]['tokens']:
-                                emb_list.append(doc_words_embeddings_dict[idx]['tokens'][subtoken])
-                    if len(emb_list) == 0:
-                        avg_emb = np.zeros(language_model.config.hidden_size)
-                    else:
-                        avg_emb = np.mean(emb_list, axis=0).flatten().tolist()
-                    doc_words_embeddings_dict[idx]['tokens'][token] = torch.tensor(avg_emb, dtype=torch.float)
-        except Exception as e:
-            print('Error: %s', str(e))
-
-    return doc_words_embeddings_dict
-
-def get_word_embeddings3(corpus, tokenizer, language_model, vocab, device, not_found_tokens='avg'):
-    embeddings_word_dict = {}
-    token_freq = defaultdict(int)
-
-    for idx, text in enumerate(tqdm(corpus, desc="Extracting word embeddings")): # hetero
-        #text = utils.text_normalize_v2(text['doc'])
-        with torch.no_grad():
-            encoded_text = tokenizer.encode_plus(text, return_tensors="pt", padding=True, truncation=True)
-            encoded_text.to(device)
-            outputs_model = language_model(**encoded_text, output_hidden_states=True)
-            last_hidden_state = outputs_model.hidden_states[-1]
-
-            for i in range(0, len(last_hidden_state)):
-                raw_tokens = [tokenizer.decode([token_id]) for token_id in encoded_text['input_ids'][i]]
-                for token, embedding in zip(raw_tokens, last_hidden_state[i]):
-                    token = str(token).strip()
-                    token_freq[token] += 1
-                    current_emb = embedding.cpu().detach().numpy().tolist()
-
-                    if token not in embeddings_word_dict.keys():
-                        embeddings_word_dict[token] = current_emb
-                    else:
-                        embeddings_word_dict[token] = np.add.reduce([embeddings_word_dict[token], current_emb])
-
-    for token, freq in token_freq.items():
-        if freq > 1:
-            embeddings_word_dict[token] = np.divide(embeddings_word_dict[token], freq).tolist()
-
-    #print("len_embeddings_word_dict", len(embeddings_word_dict.keys()), embeddings_word_dict.keys())
-    # Step 3: Create a list of embeddings in the order of the vocabulary
-    cnt_found = 0
-    cnt_not_found = 0
-    word_embeddings = []
-    not_found_tokens_dict = {}
-    for word in tqdm(vocab, desc="Extracting word embeddings2"):
-        if word in embeddings_word_dict:
-            cnt_found+=1
-            # Average embeddings for repeated words
-            word_embeddings.append(embeddings_word_dict[word])
-        else:
-            cnt_not_found+=1
-            # Handle words not in the embeddings (e.g., assign a random vector)
-            if not_found_tokens == 'avg':
-                node_tokens = tokenizer.encode_plus(word, return_tensors="pt", padding=True, truncation=True)
-                raw_tokens = [tokenizer.decode([token_id]) for token_id in node_tokens['input_ids'][0]]
-                not_found_tokens_dict[word] = raw_tokens[1:-1]
-                avg_emb, emb_list = [], []
-                for token, subtokens in not_found_tokens_dict.items():
-                    if token in embeddings_word_dict:
-                        continue
-                    for subtoken in subtokens:
-                        if subtoken in embeddings_word_dict:
-                            emb_list.append(embeddings_word_dict[subtoken])
-                if len(emb_list) == 0:
-                    avg_emb = np.ones(language_model.config.hidden_size)
-                else:
-                    avg_emb = np.mean(emb_list, axis=0).flatten().tolist()
-                word_embeddings.append(avg_emb)
-                embeddings_word_dict[token] = avg_emb
-            if not_found_tokens == 'ones':
-                word_embeddings.append(np.ones(language_model.config.hidden_size))
-            if not_found_tokens == 'zeros':
-                word_embeddings.append(np.zeros(language_model.config.hidden_size))
-            else:
-                ... # remove¿?
-
-    print("emb_words cnt_found: ", cnt_found)
-    print("emb_words cnt_not_found: ", cnt_not_found)
-    print("not_found_tokens_dict: ", len(not_found_tokens_dict))
-    return word_embeddings
-
-def normalize_text(texts, tokenize_pattern, special_chars=False, stop_words=False, set='train'):
-    texts_norm = []
-    tokenized_corpus = []
-    for text in tqdm(texts, desc=f"normalizing {set} corpus"):
-        text_norm = test_utils.text_normalize(text, special_chars, stop_words) 
-        texts_norm.append(text_norm)
-        text_doc_tokens = re.findall(tokenize_pattern, text_norm)
-        tokenized_corpus.append(text_doc_tokens)
-    return texts_norm, tokenized_corpus
-
-def create_vocab(texts, set='all', min_df=1, max_df=0.9, max_features=5000):
-    # Create a vocabulary
-    #vectorizer = CountVectorizer()
+def create_vocab(texts, min_df=1, max_df=0.9, max_features=None):
     vectorizer = CountVectorizer(min_df=min_df, max_df=max_df, max_features=max_features)
     vectorizer.fit_transform(texts)
-    vocab = vectorizer.get_feature_names_out()
-    # Create a word-to-index dictionary for fast lookups
-    word_to_index = {word: idx for idx, word in enumerate(vocab)}
-    print(f'vocab {set} set: ', len(vocab))
-    return vocab, word_to_index
+    vocab = set(vectorizer.get_feature_names_out())
+    print(f"Vocab size: {len(vocab)}")
+    return vocab
 
 
-def main():    
-    build_graph=False
+def get_word_embeddings_batched(texts_norm, texts_tokenized, tokenizer, language_model,
+                                vocab, device, set_corpus='train',
+                                not_found='avg', batch_size=32):
+    """Batch LLM inference to extract per-document contextual word embeddings."""
+    doc_word_embs = [{} for _ in texts_norm]
+    hidden_size = language_model.config.hidden_size
 
-    # autext23, semeval24, coling24, autext23_s2, semeval24_s2
-    dataset_name = 'autext23'
-    cut_off_dataset = 100
-    cuda_num = 1
-    window_size = 10 # 10 -> auetxt23 | 20 -> semeval/coling
-    special_chars = False
-    stop_words = False
-    min_df = 1 # 2 -> auetxt23 | 5 -> semeval/coling
-    max_df = 0.9
-    max_features = None # None -> all | 5000
-    batch_size = 64
-    not_found_tokens = 'avg' # avg, ones, zeros
+    for batch_start in tqdm(range(0, len(texts_norm), batch_size),
+                            desc=f"LLM embeddings [{set_corpus}]"):
+        batch_texts   = texts_norm[batch_start:batch_start + batch_size]
+        batch_indices = list(range(batch_start, min(batch_start + batch_size, len(texts_norm))))
 
-    ## google-bert/bert-base-uncased
-    ## FacebookAI/roberta-base
-    ## microsoft/deberta-v3-base
-    llm_name = 'microsoft/deberta-v3-base'
+        encoded = tokenizer(
+            batch_texts, return_tensors="pt",
+            padding=True, truncation=True, max_length=512
+        ).to(device)
 
-    file_name = f'cooc_data_{dataset_name}_{cut_off_dataset}perc'
-    output_dir = f'{utils.OUTPUT_DIR_PATH}test_graph/{llm_name.split("/")[1]}/'
-    #output_dir = f'{utils.OUTPUT_DIR_PATH}test_graph/'
-    #output_dir = f'{test_utils.EXTERNAL_DISK_PATH}cooc_graph/'
-    
-    # TransformerConv, GATConv
-    gnn_type='TransformerConv'
-    input_dim = 768 # shared_feature_dim
-    hidden_dim = 100
-    dense_hidden_dim = 64
-    num_layers = 3
-    heads = 2
-    dropout = 0.5
-    output_dim = 2
-    epochs = 100
-    patience = 10
-    learnin_rate = 0.00002 # Autext -> llm: 0.00001 | semeval -> llm: 0.000001  | coling -> llm: 0.0001 
-    weight_decay = 1e-5
+        with torch.no_grad():
+            last_hidden = language_model(**encoded, output_hidden_states=True).hidden_states[-1]
+
+        for i, doc_idx in enumerate(batch_indices):
+            token_freq: dict = defaultdict(int)
+            seq_len    = int(encoded['attention_mask'][i].sum().item())
+            raw_tokens = [tokenizer.decode([tid]) for tid in encoded['input_ids'][i, :seq_len]]
+
+            for tok, emb in zip(raw_tokens, last_hidden[i, :seq_len]):
+                tok = tok.strip()
+                if tok not in vocab:
+                    continue
+                token_freq[tok] += 1
+                cpu_emb = emb.cpu().detach()
+                if tok not in doc_word_embs[doc_idx]:
+                    doc_word_embs[doc_idx][tok] = cpu_emb.clone()
+                else:
+                    doc_word_embs[doc_idx][tok] += cpu_emb
+
+            for tok, freq in token_freq.items():
+                if freq > 1:
+                    doc_word_embs[doc_idx][tok] /= freq
+
+    for doc_idx, tokens in enumerate(
+            tqdm(texts_tokenized, desc=f"Filling missing tokens [{set_corpus}]")):
+        missing = (set(vocab) & set(tokens)) - doc_word_embs[doc_idx].keys()
+        for word in missing:
+            if not_found == 'zeros':
+                doc_word_embs[doc_idx][word] = torch.zeros(hidden_size)
+            elif not_found == 'ones':
+                doc_word_embs[doc_idx][word] = torch.ones(hidden_size)
+            else:  # avg subtokens
+                subtoks  = [t.strip() for t in tokenizer.tokenize(word)]
+                emb_list = [doc_word_embs[doc_idx][t] for t in subtoks
+                            if t in doc_word_embs[doc_idx]]
+                doc_word_embs[doc_idx][word] = (
+                    torch.stack(emb_list).mean(0) if emb_list else torch.zeros(hidden_size)
+                )
+    return doc_word_embs
+
+
+def _build_one_graph(
+    text_tokens:      list,
+    label:            int,
+    word_embs:        dict,
+    vocab:            set,
+    window_size:      int,
+    pmi_scores:       dict | None = None,
+    tfidf_scores:     dict | None = None,
+    use_edge_weights: bool = True,
+    use_pmi:          bool = False,
+    use_doc_node:     bool = True,
+    use_self_loops:   bool = True,
+):
+    """
+    Build one co-occurrence graph for a single document.
+
+    Improvements over the binary baseline:
+      - Edge weights: log(freq) x sum(1/distance) captures how often and how
+        close two words appear together within the window.
+      - PMI filtering/boosting: edges with NPMI <= 0 are removed; positive
+        pairs are boosted by (1 + NPMI). Requires pmi_scores precomputed.
+      - TF-IDF node feature: appends a scalar TF-IDF score to each node's
+        LLM embedding so the GNN knows which words are discriminative.
+      - Virtual document node: one extra node (feat = mean of all words)
+        connected to every word node, acting as a global information hub
+        and reducing the effective graph diameter.
+      - Self-loops: every node receives its own feature during aggregation,
+        critical for GCN / GAT / TransformerConv stability.
+    """
+    try:
+        # Preserve first-occurrence order (better than set() which is unordered)
+        seen: dict = {}
+        for w in text_tokens:
+            if w not in seen and w in vocab and w in word_embs:
+                seen[w] = len(seen)
+        unique_words = list(seen.keys())
+        if not unique_words:
+            return None
+
+        local_idx = seen  # {word: local_node_id}
+
+        # ── Build edge weights: frequency x distance decay ─────────────────
+        edge_w:    dict = defaultdict(float)   # (i,j) -> sum(1/dist)
+        edge_freq: dict = defaultdict(int)     # (i,j) -> co-occurrence count
+
+        for pos, w1 in enumerate(text_tokens):
+            if w1 not in local_idx:
+                continue
+            end = min(pos + window_size + 1, len(text_tokens))
+            for j in range(pos + 1, end):
+                w2 = text_tokens[j]
+                if w2 not in local_idx or w2 == w1:
+                    continue
+                dist = j - pos
+                key  = (local_idx[w1], local_idx[w2])
+                edge_w[key]    += 1.0 / dist
+                edge_freq[key] += 1
+
+        if not edge_w:
+            return None
+
+        # ── Assemble edge lists ────────────────────────────────────────────
+        src, dst, attrs = [], [], []
+        for (i1, i2), w_sum in edge_w.items():
+            freq   = edge_freq[(i1, i2)]
+            weight = math.log1p(freq) * w_sum if use_edge_weights else 1.0
+
+            # PMI: filter non-informative pairs, boost informative ones
+            if use_pmi and pmi_scores is not None:
+                npmi = pmi_scores.get((unique_words[i1], unique_words[i2]), 0.0)
+                if npmi <= 0:
+                    continue                  # remove edges with no positive association
+                weight *= (1.0 + npmi)        # boost by NPMI in (0, 1]
+
+            src   += [i1, i2]
+            dst   += [i2, i1]
+            attrs += [weight, weight]         # undirected: both directions
+
+        if not src:
+            return None
+
+        # ── Node features ──────────────────────────────────────────────────
+        base_feats = torch.stack([word_embs[w] for w in unique_words])   # [N, H]
+
+        # Append TF-IDF score as an extra node dimension (discriminative weight)
+        if tfidf_scores is not None:
+            tfidf_vec  = torch.tensor(
+                [tfidf_scores.get(w, 0.0) for w in unique_words], dtype=torch.float
+            ).unsqueeze(1)                                                # [N, 1]
+            node_feats = torch.cat([base_feats, tfidf_vec], dim=1)       # [N, H+1]
+        else:
+            node_feats = base_feats
+
+        n_words = len(unique_words)
+
+        # ── Virtual document node ──────────────────────────────────────────
+        # Feature = mean of all word embeddings (global summary of the doc)
+        # Connected to every word node bidirectionally with neutral weight 1.0
+        if use_doc_node:
+            doc_feat   = node_feats.mean(0, keepdim=True)                # [1, H(+1)]
+            node_feats = torch.cat([node_feats, doc_feat], dim=0)        # [N+1, H(+1)]
+            doc_idx    = n_words
+            for wi in range(n_words):
+                src   += [wi, doc_idx]
+                dst   += [doc_idx, wi]
+                attrs += [1.0, 1.0]
+
+        # ── Finalize edge tensors ──────────────────────────────────────────
+        edge_index = torch.tensor([src, dst], dtype=torch.long)
+        edge_attr  = torch.tensor(attrs, dtype=torch.float).unsqueeze(1)  # [E, 1]
+
+        # ── Self-loops ─────────────────────────────────────────────────────
+        # Added after doc_node so every node (including the virtual one) gets one.
+        # Essential for GCN/GAT/TransformerConv to retain the node's own representation.
+        if use_self_loops:
+            n_nodes    = node_feats.shape[0]
+            loop_idx   = torch.arange(n_nodes, dtype=torch.long)
+            loop_ei    = torch.stack([loop_idx, loop_idx], dim=0)         # [2, N]
+            loop_ea    = torch.ones(n_nodes, 1, dtype=torch.float)        # [N, 1]
+            edge_index = torch.cat([edge_index, loop_ei], dim=1)
+            edge_attr  = torch.cat([edge_attr,  loop_ea], dim=0)
+
+        return Data(x=node_feats, edge_index=edge_index, edge_attr=edge_attr,
+                    y=torch.tensor([label]))
+
+    except Exception as e:
+        logger.warning(f"Graph build failed: {e}")
+        return None
+
+
+def build_graph_data(texts_tokenized, labels, word_embs, vocab, window_size,
+                     pmi_scores=None, doc_tfidf=None,
+                     use_edge_weights=True, use_pmi=False,
+                     use_doc_node=True, use_self_loops=True,
+                     set_name='train', n_jobs=4):
+    results = Parallel(n_jobs=n_jobs, prefer='threads')(
+        delayed(_build_one_graph)(
+            tokens, label, word_embs[idx], vocab, window_size,
+            pmi_scores=pmi_scores,
+            tfidf_scores=doc_tfidf[idx] if doc_tfidf is not None else None,
+            use_edge_weights=use_edge_weights,
+            use_pmi=use_pmi,
+            use_doc_node=use_doc_node,
+            use_self_loops=use_self_loops,
+        )
+        for idx, (tokens, label) in enumerate(
+            tqdm(zip(texts_tokenized, labels), total=len(labels),
+                 desc=f"Building graphs [{set_name}]"))
+    )
+    return [r for r in results if r is not None]
+
+
+# ─── Main ─────────────────────────────────────────────────────────────────────
+
+def main(
+    dataset_name, cut_off_dataset, cuda_num=0,
+    build_graph=True, window_size=10,
+    special_chars=False, stop_words=False,
+    min_df=1, max_df=0.9, max_features=None,
+    batch_size=64, llm_batch_size=32, not_found_tokens='avg',
+    llm_name='microsoft/deberta-v3-base',
+    gnn_type='TransformerConv',
+    hidden_dim=100, dense_hidden_dim=64,
+    num_layers=2, heads=2, dropout=0.5,
+    epochs=100, patience=10, lr=0.00002,
+    weight_decay=1e-5, n_jobs=4,
+    # ── Graph improvement flags ──────────────────────────────────────────
+    use_edge_weights=True,   # log(freq) x sum(1/dist) edge weighting
+    use_pmi=False,           # PMI-based edge filtering + boosting
+    pmi_min_count=5,         # minimum co-occurrence count to compute PMI
+    use_tfidf_feat=True,     # append TF-IDF score as extra node feature (+1 dim)
+    use_doc_node=True,       # add virtual document node connected to all words
+    use_self_loops=True,     # add self-loops for stable GNN aggregation
+    use_edge_attr=True,      # pass edge_attr to the GNN convolutions
+    # ────────────────────────────────────────────────────────────────────
+    file_name_data='', output_dir='',
+):
+    dataset_name = canonicalize_dataset_name(dataset_name)
+    mlflow.log_params({
+        "dataset":          dataset_name,
+        "cut_off_dataset":  cut_off_dataset,
+        "llm_name":         llm_name,
+        "gnn_type":         gnn_type,
+        "window_size":      window_size,
+        "use_edge_weights": use_edge_weights,
+        "use_pmi":          use_pmi,
+        "pmi_min_count":    pmi_min_count,
+        "use_tfidf_feat":   use_tfidf_feat,
+        "use_doc_node":     use_doc_node,
+        "use_self_loops":   use_self_loops,
+        "use_edge_attr":    use_edge_attr,
+    })
+
     device = torch.device(f"cuda:{cuda_num}" if torch.cuda.is_available() else "cpu")
 
-    
-    if build_graph == True:
-        # ****************************** PROCESS AUTEXT DATASET && CUTOF
-        train_text_set, val_text_set, test_text_set  = test_utils.read_dataset(dataset_name)
-        # *** TRAIN
-        cut_dataset_train = len(train_text_set) * (int(cut_off_dataset) / 100)
-        train_set = train_text_set[:int(cut_dataset_train)]
-        # *** VAL
-        cut_dataset_val = len(val_text_set) * (int(cut_off_dataset) / 100)
-        val_set = val_text_set[:int(cut_dataset_val)]
-        # *** TEST
-        cut_dataset_test = len(test_text_set) * (int(cut_off_dataset) / 100)
-        test_set = test_text_set[:int(cut_dataset_test)]
-
-        print("distro_train_val_test: ", len(train_set), len(val_set), len(test_set))
-        print("label_distro_train_val_test: ", train_set.value_counts('label'), val_set.value_counts('label'), test_set.value_counts('label'))
-
-        # Example text data (split into train, validation, and test sets)
-        train_texts = list(train_set['text'])[:]
-        val_texts = list(val_set['text'])[:]
-        test_texts = list(test_set['text'])[:]
-
-        # Labels (binary classification: 0 or 1)
-        train_labels = list(train_set['label'])[:]
-        val_labels = list(val_set['label'])[:]
-        test_labels = list(test_set['label'])[:]
-
-        # Normalize and Tokenize the corpus 
-        tokenize_pattern = "[A-Z]{2,}(?![a-z])|[A-Z][a-z]+(?=[A-Z])|[\'\w\-]+"
-        train_texts_norm, train_texts_tokenized = normalize_text(train_texts, tokenize_pattern, special_chars, stop_words, set='train')
-        val_texts_norm, val_texts_tokenized = normalize_text(val_texts, tokenize_pattern, special_chars, stop_words, set='val')
-        test_texts_norm, test_texts_tokenized = normalize_text(test_texts, tokenize_pattern, special_chars, stop_words, set='test')
-
-        # create a vocabulary
-        all_texts_norm = train_texts_norm + val_texts_norm + test_texts_norm
-        vocab, word_to_index = create_vocab(all_texts_norm, min_df=min_df, max_df=max_df, max_features=max_features)
-        print("not_found_tokens approach: ", not_found_tokens)
-        # LLM        
-        # Extract embedding from language model
-        tokenizer = AutoTokenizer.from_pretrained(llm_name, model_max_length=512)
-        language_model = AutoModel.from_pretrained(llm_name, output_hidden_states=True).to(device)
-
-        # *** Generate embeddings method 1
-        '''
-        word_features = []
-        for word in tqdm(vocab[:], desc="Extracting word embeddings"):
-            word_embedding = get_word_embeddings(word, tokenizer, language_model, device)
-            word_features.append(word_embedding)
-        word_features = torch.tensor(word_features, dtype=torch.float)
-        '''
-
-        # *** Generate embeddings method 2     
-        train_words_emb = get_word_embeddings2(train_texts_norm, train_texts_tokenized, tokenizer, language_model, vocab, device, set_corpus='train', not_found_tokens=not_found_tokens)
-        val_words_emb = get_word_embeddings2(val_texts_norm, val_texts_tokenized, tokenizer, language_model, vocab, device, set_corpus='val', not_found_tokens=not_found_tokens)
-        test_words_emb = get_word_embeddings2(test_texts_norm, test_texts_tokenized, tokenizer, language_model, vocab, device, set_corpus='test', not_found_tokens=not_found_tokens)
-        #print(len(train_words_emb[0]['tokens'].keys()), train_words_emb[0]['tokens'].keys())
-
-        train_data, val_data, test_data = [], [], []
-        for idx, (text_tokenized, label) in enumerate(zip(tqdm(train_texts_tokenized, desc="Extracting doc train edges"), train_labels)):
-            doc_edges = extract_doc_edges(text_tokenized, label, train_words_emb[idx]['tokens'], vocab, window_size)
-            if doc_edges:
-                train_data.append(doc_edges)
-        for idx, (text_tokenized, label) in enumerate(zip(tqdm(val_texts_tokenized, desc="Extracting doc val edges"), val_labels)):
-            doc_edges = extract_doc_edges(text_tokenized, label, val_words_emb[idx]['tokens'], vocab, window_size)
-            if doc_edges:
-                val_data.append(doc_edges)
-        for idx, (text_tokenized, label) in enumerate(zip(tqdm(test_texts_tokenized, desc="Extracting doc test edges"), test_labels)):
-            doc_edges = extract_doc_edges(text_tokenized, label, test_words_emb[idx]['tokens'], vocab, window_size)
-            if doc_edges:
-                test_data.append(doc_edges)
-
-
-        # *** Generate embeddings method 3
-        '''
-        word_features = get_word_embeddings3(all_texts_norm, tokenizer, language_model, vocab, device, not_found_tokens=not_found_tokens)
-        word_features = torch.tensor(word_features, dtype=torch.float)
-        print("word_features", len(word_features))
-        train_data = [extract_doc_edges2(text_tokenized, label, word_features, word_to_index, vocab, window_size) for idx, (text_tokenized, label) in enumerate(zip(tqdm(train_texts_tokenized, desc="Extracting doc train edges"), train_labels))]
-        val_data = [extract_doc_edges2(text_tokenized, label, word_features, word_to_index, vocab, window_size) for idx, (text_tokenized, label) in enumerate(zip(tqdm(val_texts_tokenized, desc="Extracting doc val edges"), train_labels))]
-        test_data = [extract_doc_edges2(text_tokenized, label, word_features, word_to_index, vocab, window_size) for idx, (text_tokenized, label) in enumerate(zip(tqdm(test_texts_tokenized, desc="Extracting doc test edges"), train_labels))]
-        '''
-
-        # *** Save data
-        all_data = [train_data, val_data, test_data]
-        #word_features = [train_words_emb, val_words_emb, test_words_emb]
-        data_obj = {
-            #"word_features": word_features, # word_emb method 3
-            "vocab": vocab,
-            "all_data": all_data,
-            "word_to_index": word_to_index,
-        }
-        utils.save_data(data_obj, file_name, path=output_dir, format_file='.pkl', compress=False)
+    # Support both '10_10_10' and single-int cut_off formats
+    if isinstance(cut_off_dataset, str) and '_' in cut_off_dataset:
+        cut_train, cut_val, cut_test = [int(x) for x in cut_off_dataset.split('_')]
     else:
-        data_obj = utils.load_data(file_name, path=output_dir, format_file='.pkl', compress=False)
-        train_data = data_obj['all_data'][0]
-        val_data = data_obj['all_data'][1]
-        test_data = data_obj['all_data'][2]
-        word_to_index = data_obj['word_to_index']
-        #word_features = data_obj['word_features'] # word_emb method 3
-        #train_words_emb = word_features[0]
-        #val_words_emb = word_features[1]
-        #test_words_emb = word_features[2]
+        cut_train = cut_val = cut_test = int(cut_off_dataset)
 
-    # *** for embeddings method 2
-    #train_data = [extract_node_features(data, train_words_emb[idx]) for idx, data in enumerate(tqdm(train_data, desc="Extracting train node feat"))]
-    #val_data = [extract_node_features(data, val_words_emb[idx]) for idx, data in enumerate(tqdm(val_data, desc="Extracting val node feat"))]
-    #test_data = [extract_node_features(data, test_words_emb[idx]) for idx, data in enumerate(tqdm(test_data, desc="Extracting test node feat"))]
-    
-    # *** for embeddings method 3
-    #train_data = [extract_node_features(data, word_features, word_to_index) for idx, data in enumerate(tqdm(train_data, desc="Extracting train node feat"))]
-    #val_data = [extract_node_features(data, word_features, word_to_index) for idx, data in enumerate(tqdm(val_data, desc="Extracting val node feat"))]
-    #test_data = [extract_node_features(data, word_features, word_to_index) for idx, data in enumerate(tqdm(test_data, desc="Extracting test node feat"))]
+    if build_graph:
+        train_text_set, val_text_set, test_text_set = test_utils.read_dataset(
+            dataset_name, print_info=False)
 
-    print(train_data[0])
+        train_set = train_text_set[:int(len(train_text_set) * cut_train / 100)]
+        val_set   = val_text_set[:int(len(val_text_set)   * cut_val   / 100)]
+        test_set  = test_text_set[:int(len(test_text_set) * cut_test  / 100)]
 
-    # Create DataLoader for train, validation, and test partitions
-    train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False)
-    test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
+        print("distro_train_val_test:", len(train_set), len(val_set), len(test_set))
+        print("label_distro:", train_set.value_counts('label').to_dict(),
+              val_set.value_counts('label').to_dict(),
+              test_set.value_counts('label').to_dict())
 
-    for batch in train_loader:
-        print(batch)
-        break
+        train_texts = list(train_set['text'])
+        val_texts   = list(val_set['text'])
+        test_texts  = list(test_set['text'])
 
-    # Initialize the model
+        train_labels = list(train_set['label'])
+        val_labels   = list(val_set['label'])
+        test_labels  = list(test_set['label'])
+
+        num_classes, label_list = infer_num_classes(train_labels, val_labels, test_labels)
+        mlflow.log_param("num_classes", num_classes)
+
+        train_texts_norm, train_tokens = normalize_text_corpus(train_texts, special_chars, stop_words, 'train')
+        val_texts_norm,   val_tokens   = normalize_text_corpus(val_texts,   special_chars, stop_words, 'val')
+        test_texts_norm,  test_tokens  = normalize_text_corpus(test_texts,  special_chars, stop_words, 'test')
+
+        all_texts_norm = train_texts_norm + val_texts_norm + test_texts_norm
+        all_tokens     = train_tokens     + val_tokens     + test_tokens
+        vocab = create_vocab(all_texts_norm, min_df=min_df, max_df=max_df, max_features=max_features)
+
+        # ── Corpus-level PMI ─────────────────────────────────────────────
+        pmi_scores = None
+        if use_pmi:
+            pmi_scores = compute_pmi(all_tokens, vocab, window_size, pmi_min_count)
+            mlflow.log_param("pmi_pairs", len(pmi_scores) // 2)
+
+        # ── Per-document TF-IDF scores ────────────────────────────────────
+        train_tfidf = val_tfidf = test_tfidf = None
+        if use_tfidf_feat:
+            n_train     = len(train_texts_norm)
+            n_val       = len(val_texts_norm)
+            all_tfidf   = compute_tfidf_scores(all_texts_norm, vocab)
+            train_tfidf = all_tfidf[:n_train]
+            val_tfidf   = all_tfidf[n_train: n_train + n_val]
+            test_tfidf  = all_tfidf[n_train + n_val:]
+
+        # ── LLM contextual embeddings ─────────────────────────────────────
+        tokenizer      = AutoTokenizer.from_pretrained(llm_name, model_max_length=512)
+        language_model = AutoModel.from_pretrained(llm_name, output_hidden_states=True).to(device)
+        language_model.eval()
+
+        train_word_embs = get_word_embeddings_batched(
+            train_texts_norm, train_tokens, tokenizer, language_model,
+            vocab, device, 'train', not_found_tokens, llm_batch_size)
+        val_word_embs = get_word_embeddings_batched(
+            val_texts_norm, val_tokens, tokenizer, language_model,
+            vocab, device, 'val', not_found_tokens, llm_batch_size)
+        test_word_embs = get_word_embeddings_batched(
+            test_texts_norm, test_tokens, tokenizer, language_model,
+            vocab, device, 'test', not_found_tokens, llm_batch_size)
+
+        del language_model
+        torch.cuda.empty_cache()
+
+        # ── Build graphs ──────────────────────────────────────────────────
+        train_data = build_graph_data(
+            train_tokens, train_labels, train_word_embs, vocab, window_size,
+            pmi_scores=pmi_scores, doc_tfidf=train_tfidf,
+            use_edge_weights=use_edge_weights, use_pmi=use_pmi,
+            use_doc_node=use_doc_node, use_self_loops=use_self_loops,
+            set_name='train', n_jobs=n_jobs)
+        val_data = build_graph_data(
+            val_tokens, val_labels, val_word_embs, vocab, window_size,
+            pmi_scores=pmi_scores, doc_tfidf=val_tfidf,
+            use_edge_weights=use_edge_weights, use_pmi=use_pmi,
+            use_doc_node=use_doc_node, use_self_loops=use_self_loops,
+            set_name='val', n_jobs=n_jobs)
+        test_data = build_graph_data(
+            test_tokens, test_labels, test_word_embs, vocab, window_size,
+            pmi_scores=pmi_scores, doc_tfidf=test_tfidf,
+            use_edge_weights=use_edge_weights, use_pmi=use_pmi,
+            use_doc_node=use_doc_node, use_self_loops=use_self_loops,
+            set_name='test', n_jobs=n_jobs)
+
+        os.makedirs(output_dir, exist_ok=True)
+        utils.save_data(
+            {"vocab": vocab, "train_data": train_data,
+             "val_data": val_data, "test_data": test_data},
+            file_name_data, path=f'{output_dir}/', format_file='.pkl', compress=False)
+
+    else:
+        data_obj   = utils.load_data(file_name_data, path=f'{output_dir}/', format_file='.pkl', compress=False)
+        train_data = data_obj['train_data']
+        val_data   = data_obj['val_data']
+        test_data  = data_obj['test_data']
+
+    inferred_labels = sorted({int(d.y.item()) for d in train_data + val_data + test_data})
+    num_classes = len(inferred_labels)
+    label_list  = inferred_labels
+
+    # input_dim inferred from the first graph (accounts for TF-IDF +1 dim automatically)
+    input_dim     = train_data[0].x.shape[1]
+    has_edge_attr = hasattr(train_data[0], 'edge_attr') and train_data[0].edge_attr is not None
+
+    print(f"num_classes={num_classes} | input_dim={input_dim} | "
+          f"edge_attr={has_edge_attr} | "
+          f"train={len(train_data)} | val={len(val_data)} | test={len(test_data)}")
+
+    train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True,  num_workers=0)
+    val_loader   = DataLoader(val_data,   batch_size=batch_size, shuffle=False, num_workers=0)
+    test_loader  = DataLoader(test_data,  batch_size=batch_size, shuffle=False, num_workers=0)
+
     test_utils.set_random_seed(42)
-    model = GNN(input_dim, hidden_dim, dense_hidden_dim, output_dim, dropout, num_layers, gnn_type=gnn_type, heads=heads, task='graph')
-    model = model.to(device)
+    model = GNN(
+        input_dim, hidden_dim, dense_hidden_dim, num_classes,
+        dropout, num_layers, gnn_type=gnn_type, heads=heads,
+        use_edge_attr=(use_edge_attr and has_edge_attr),
+        edge_attr_dim=1,
+    ).to(device)
     print(model)
 
-    # Training loop (example)
-    optimizer = torch.optim.Adam(model.parameters(), lr=learnin_rate, weight_decay=weight_decay)
-    criterion = torch.nn.CrossEntropyLoss()
-    early_stopper = EarlyStopper(patience=patience, min_delta=0)
+    class_weights, class_counts = compute_class_weights(train_data, num_classes, device)
+    optimizer     = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+    criterion     = nn.CrossEntropyLoss(weight=class_weights)
+    early_stopper = EarlyStopper(patience=patience, min_delta=0, mode='max')
+
+    print("class_counts:",  class_counts.tolist())
+    print("class_weights:", [round(float(w), 4) for w in class_weights.cpu()])
+    mlflow.log_params({
+        "class_counts":  class_counts.tolist(),
+        "class_weights": [round(float(w), 6) for w in class_weights.cpu()],
+        "model_params":  str(model),
+    })
+
+    best_val_f1      = float('-inf')
+    best_test_f1     = 0.0
+    best_model_state = copy.deepcopy(model.state_dict())
+    stop_epoch       = 0
 
     logger.info("Init GNN training!")
-    for epoch in range(1, epochs):
-        loss_train = train_cooc(model, train_loader, device, optimizer, criterion)
-        val_acc, val_f1_macro, val_loss = test_cooc(val_loader, model, device, criterion)
-        #train_acc, train_f1_macro, train_loss = test_cooc(train_loader)
+    start = time.time()
 
-        if early_stopper.early_stop(val_loss):
-            print('Early stopping fue to not improvement!')
+    for epoch in range(epochs):
+        train_loss               = train_epoch(model, train_loader, device, optimizer, criterion)
+        val_f1,  val_acc,  val_loss,  _, _ = evaluate(model, val_loader,  device, criterion)
+        test_f1, test_acc, test_loss, _, _ = evaluate(model, test_loader, device, criterion)
+
+        print(f"Epoch {epoch:02d} | "
+              f"Train-Loss {train_loss:.4f} | Val-Loss {val_loss:.4f} | Test-Loss {test_loss:.4f} | "
+              f"Val-Acc {val_acc:.4f} | Val-F1 {val_f1:.4f} | "
+              f"Test-Acc {test_acc:.4f} | Test-F1 {test_f1:.4f}")
+
+        mlflow.log_metrics({
+            "F1Score-val": val_f1, "Accuracy-val": val_acc, "Loss-val": val_loss,
+            "F1Score-test": test_f1, "Accuracy-test": test_acc, "Loss-test": test_loss,
+        }, step=epoch)
+
+        if val_f1 > best_val_f1:
+            best_val_f1      = val_f1
+            best_model_state = copy.deepcopy(model.state_dict())
+        if test_f1 > best_test_f1:
+            best_test_f1 = test_f1
+
+        stop_epoch = epoch
+        if early_stopper.early_stop(val_f1):
+            print("Early stopping triggered!")
             break
-        print(f'Epoch {epoch}, Loss Train: {loss_train:.4f}, Loss Val: {val_loss:.4f}, Val Acc: {val_acc:.4f}, Val F1Score: {val_f1_macro:.4f}')
+
     logger.info("Done GNN training!")
+    print(f"--- {time.time() - start:.1f}s Graph Training Time ---")
 
-    # Final evaluation on the test set
-    test_acc, test_f1_macro, test_loss = test_cooc(test_loader, model, device, criterion)
-    print(f'Test Accuracy: {test_acc:.4f}')
-    print(f'Test F1Score: {test_f1_macro:.4f}')
+    model.load_state_dict(best_model_state)
+    test_f1, test_acc, test_loss, preds_test, labels_test = evaluate(
+        model, test_loader, device, criterion)
+    print(f"----> Test-Loss {test_loss:.4f} | Test-Acc {test_acc:.4f} | Test-F1 {test_f1:.4f}")
+    print(confusion_matrix(labels_test, preds_test, labels=label_list))
 
+    os.makedirs(f"{output_dir}/models", exist_ok=True)
+    torch.save(model.state_dict(), f"{output_dir}/models/cooc_model_{file_name_data}.pth")
+
+    mlflow.log_metrics({
+        "Final-F1Macro-test":  test_f1,
+        "Final-Accuracy-test": test_acc,
+        "Final-Loss-test":     test_loss,
+        "Best-F1Macro-test":   best_test_f1,
+        "stop_epoch":          stop_epoch,
+    })
+    mlflow.log_artifact(log_file_path)
+
+    # ── Prediction breakdown ───────────────────────────────────────────────
+    _, _, test_text_set = test_utils.read_dataset(dataset_name, print_info=False)
+    test_set_df = test_text_set[:int(len(test_text_set) * cut_test / 100)].copy()
+    if 'model' not in test_set_df.columns:
+        test_set_df['model'] = 'unknown'
+    test_set_df['preds_test']  = preds_test
+    test_set_df['labels_test'] = labels_test
+
+    preds_path = f"{utils.OUTPUT_DIR_PATH}preds_cooc_{dataset_name}.csv"
+    test_set_df[['id', 'label', 'labels_test', 'preds_test', 'source', 'model']].to_csv(
+        preds_path, index=False)
+    mlflow.log_artifact(preds_path)
+
+    source_acc = (
+        test_set_df.groupby("source")
+        .apply(lambda df: (df["preds_test"] == df["labels_test"]).mean())
+        .reset_index(name="accuracy")
+    )
+    print(source_acc)
+
+
+# ─── Entry point ──────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config_path", type=str, default=None)
+    args = parser.parse_args()
+
+    if args.config_path:
+        with open(args.config_path, "r") as f:
+            config = json.load(f)
+        if config.get('_done') in (True, 'True'):
+            sys.exit("Experiment already DONE")
+        config.pop('_done', None)
+    else:
+        config = {
+            'name':             'manual_run',
+            'mlflow_exp_name':  'CoOc-Graph',
+
+            # ── Dataset ──────────────────────────────────────────────────
+            'dataset_name':    'autext23',    # autext23 | autext23_s2 | autext24 | semeval24 | coling24
+            'cut_off_dataset': '10_10_10',    # '10_10_10' | '50_50_50' | '100_100_100'
+            'cuda_num':        1,
+
+            # ── Graph construction ────────────────────────────────────────
+            'build_graph':  True,
+            'window_size':  10,               # 10 -> autext | 20 -> semeval/coling
+
+            # ── Vocabulary ───────────────────────────────────────────────
+            'min_df':       3,                # 2 -> autext | 5 -> semeval/coling
+            'max_df':       0.9,
+            'max_features': None,             # None -> all | 5000, 10000, ...
+
+            # ── Text normalization ────────────────────────────────────────
+            'special_chars': False,
+            'stop_words':    False,
+
+            # ── LLM ──────────────────────────────────────────────────────
+            ## google-bert/bert-base-uncased | FacebookAI/roberta-base
+            ## microsoft/deberta-v3-base
+            'llm_name':         'microsoft/deberta-v3-base',
+            'not_found_tokens': 'avg',        # avg | ones | zeros
+            'llm_batch_size':   32,           # texts per LLM forward pass
+
+            # ── Graph improvements ────────────────────────────────────────
+            # Each flag is independent — mix and match for ablation studies.
+            #
+            # use_edge_weights: weight each co-occurrence edge by log(freq) x sum(1/dist)
+            #   closer words and more frequent pairs get stronger edges
+            # use_pmi: filter edges with NPMI <= 0 and boost surviving edges by (1+NPMI)
+            #   removes trivial pairs (the-of, is-a, etc.) that add noise
+            #   NOTE: slower build; set pmi_min_count higher to skip rare pairs
+            # use_tfidf_feat: appends a 1D TF-IDF score to each node's LLM embedding
+            #   gives the GNN a signal for how discriminative each word is in its doc
+            #   NOTE: increases input_dim by 1 (handled automatically)
+            # use_doc_node: adds one virtual node (mean embedding) connected to all words
+            #   shortens graph diameter; helps aggregate global document context
+            # use_self_loops: every node (including doc node) gets a self-loop
+            #   required for GCN/GAT/TransformerConv to retain own features during aggregation
+            # use_edge_attr: whether the GNN convolutions consume the edge_attr tensor
+            #   if False, edge_attr is still built but ignored by the model
+            'use_edge_weights': True,
+            'use_pmi':          False,
+            'pmi_min_count':    5,
+            'use_tfidf_feat':   True,
+            'use_doc_node':     True,
+            'use_self_loops':   True,
+            'use_edge_attr':    True,
+
+            # ── GNN architecture ──────────────────────────────────────────
+            'gnn_type':         'TransformerConv',  # GCNConv | GATConv | TransformerConv
+            'hidden_dim':       100,
+            'dense_hidden_dim': 64,
+            'num_layers':       2,
+            'heads':            2,
+            'dropout':          0.5,
+
+            # ── Training ─────────────────────────────────────────────────
+            'batch_size':    64,
+            'epochs':        100,
+            'patience':      10,
+            'lr':            0.00002,         # autext: 2e-5 | semeval: 1e-6 | coling: 1e-4
+            'weight_decay':  1e-5,
+            'n_jobs':        4,               # parallel workers for graph construction
+        }
+
+    config['dataset_name'] = canonicalize_dataset_name(config['dataset_name'])
+    dataset_name = config['dataset_name']
+
+    # setdefault: runner-supplied values win; these are fallbacks for manual runs
+    config.setdefault('file_name_data', f"cooc_data_{dataset_name}_{config['cut_off_dataset']}perc")
+    config.setdefault('output_dir', f'{test_utils.EXTERNAL_DISK_PATH}cooc_graph')
+
+    run_tags = configure_mlflow_run(config, dataset_name)
+    with mlflow.start_run(tags=run_tags):
+        for k, v in config.items():
+            mlflow.log_param(k, v)
+        main(**get_main_kwargs(config))

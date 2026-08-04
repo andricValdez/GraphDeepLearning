@@ -1,0 +1,240 @@
+{
+  "_comment": "OFAT ablation study for TransformerConv on Co-occurrence graphs. Graphs are pre-built (build_graph=false by default); the runner sets build_graph=true automatically when the PKL is missing.",
+
+  "defaults": {
+    "mlflow_exp_name":  "Ablation-Study-CoOc-TransformerConv",
+    "gnn_type":         "TransformerConv",
+    "heads":            2,
+    "build_graph":      false,
+    "dataset_name":     "autext23",
+    "cut_off_dataset":  "10_10_10",
+    "cuda_num":         1,
+
+    "llm_name":         "microsoft/deberta-v3-base",
+    "not_found_tokens": "avg",
+    "llm_batch_size":   32,
+
+    "window_size":      10,
+    "min_df":           3,
+    "max_df":           0.9,
+    "max_features":     null,
+    "stop_words":       false,
+    "special_chars":    false,
+
+    "use_edge_weights": true,
+    "use_pmi":          false,
+    "pmi_min_count":    5,
+    "use_tfidf_feat":   true,
+    "use_doc_node":     true,
+    "use_self_loops":   true,
+    "use_edge_attr":    true,
+
+    "hidden_dim":       100,
+    "dense_hidden_dim": 64,
+    "num_layers":       2,
+    "dropout":          0.5,
+
+    "batch_size":       64,
+    "epochs":           100,
+    "patience":         10,
+    "lr":               0.00002,
+    "weight_decay":     1e-5,
+    "n_jobs":           4
+  },
+
+  "experiments": [
+
+    {
+      "_comment": "── Baseline ─────────────────────────────────────────────────────────────────",
+      "_group": "graph_ablation",
+      "name": "trans_base",
+      "_description": "TransformerConv full: all graph improvements on, hid100, 2L, 2H, dr0.5, lr2e-5, DeBERTa, w10"
+    },
+
+    {
+      "_comment": "── Graph improvement ablation (OFAT) ────────────────────────────────────────",
+      "_group": "graph_ablation",
+      "name": "trans_noew",
+      "_description": "No distance-decay/freq edge weights → binary edges",
+      "use_edge_weights": false
+    },
+    {
+      "_group": "graph_ablation",
+      "name": "trans_pmi",
+      "_description": "Enable PMI edge filtering and boosting (NPMI > 0)",
+      "use_pmi": true
+    },
+    {
+      "_group": "graph_ablation",
+      "name": "trans_pmi10",
+      "_description": "PMI with stricter min_count=10",
+      "use_pmi": true,
+      "pmi_min_count": 10
+    },
+    {
+      "_group": "graph_ablation",
+      "name": "trans_notf",
+      "_description": "No TF-IDF node feature (+1 dim removed)",
+      "use_tfidf_feat": false
+    },
+    {
+      "_group": "graph_ablation",
+      "name": "trans_nodn",
+      "_description": "No virtual document node",
+      "use_doc_node": false
+    },
+    {
+      "_group": "graph_ablation",
+      "name": "trans_nosl",
+      "_description": "No self-loops",
+      "use_self_loops": false
+    },
+    {
+      "_group": "graph_ablation",
+      "name": "trans_noea",
+      "_description": "Edge attr built but NOT fed to GNN (model-only flag, same PKL as base)",
+      "use_edge_attr": false
+    },
+    {
+      "_group": "graph_ablation",
+      "name": "trans_bare",
+      "_description": "Original binary co-occurrence graph — all improvements off",
+      "use_edge_weights": false,
+      "use_tfidf_feat":   false,
+      "use_doc_node":     false,
+      "use_self_loops":   false,
+      "use_edge_attr":    false
+    },
+
+    {
+      "_comment": "── Architecture: heads ──────────────────────────────────────────────────────",
+      "_group": "arch_ablation",
+      "name": "trans_1H",
+      "heads": 1
+    },
+    {
+      "_group": "arch_ablation",
+      "name": "trans_3H",
+      "heads": 3
+    },
+    {
+      "_group": "arch_ablation",
+      "name": "trans_4H",
+      "heads": 4
+    },
+
+    {
+      "_comment": "── Architecture: hidden_dim ─────────────────────────────────────────────────",
+      "_group": "arch_ablation",
+      "name": "trans_hid50",
+      "hidden_dim": 50
+    },
+    {
+      "_group": "arch_ablation",
+      "name": "trans_hid200",
+      "hidden_dim": 200
+    },
+    {
+      "_group": "arch_ablation",
+      "name": "trans_hid300",
+      "hidden_dim": 300
+    },
+
+    {
+      "_comment": "── Architecture: dense_hidden_dim ───────────────────────────────────────────",
+      "_group": "arch_ablation",
+      "name": "trans_dense128",
+      "dense_hidden_dim": 128
+    },
+
+    {
+      "_comment": "── Architecture: num_layers ─────────────────────────────────────────────────",
+      "_group": "arch_ablation",
+      "name": "trans_1L",
+      "num_layers": 1
+    },
+    {
+      "_group": "arch_ablation",
+      "name": "trans_3L",
+      "num_layers": 3
+    },
+
+    {
+      "_comment": "── Architecture: dropout ────────────────────────────────────────────────────",
+      "_group": "arch_ablation",
+      "name": "trans_dr025",
+      "dropout": 0.25
+    },
+    {
+      "_group": "arch_ablation",
+      "name": "trans_dr075",
+      "dropout": 0.75
+    },
+
+    {
+      "_comment": "── Architecture: learning rate ──────────────────────────────────────────────",
+      "_group": "arch_ablation",
+      "name": "trans_lr1e4",
+      "lr": 0.0001
+    },
+    {
+      "_group": "arch_ablation",
+      "name": "trans_lr1e5",
+      "lr": 0.00001
+    },
+
+    {
+      "_comment": "── Window size ──────────────────────────────────────────────────────────────",
+      "_group": "window_ablation",
+      "name": "trans_w5",
+      "window_size": 5
+    },
+    {
+      "_group": "window_ablation",
+      "name": "trans_w15",
+      "window_size": 15
+    },
+    {
+      "_group": "window_ablation",
+      "name": "trans_w20",
+      "window_size": 20
+    },
+
+    {
+      "_comment": "── Vocabulary: min_df ───────────────────────────────────────────────────────",
+      "_group": "vocab_ablation",
+      "name": "trans_df1",
+      "min_df": 1
+    },
+    {
+      "_group": "vocab_ablation",
+      "name": "trans_df5",
+      "min_df": 5
+    },
+
+    {
+      "_comment": "── Vocabulary: max_features ─────────────────────────────────────────────────",
+      "_group": "vocab_ablation",
+      "name": "trans_mf5k",
+      "max_features": 5000
+    },
+    {
+      "_group": "vocab_ablation",
+      "name": "trans_mf10k",
+      "max_features": 10000
+    },
+
+    {
+      "_comment": "── LLM ──────────────────────────────────────────────────────────────────────",
+      "_group": "llm_ablation",
+      "name": "trans_roberta",
+      "llm_name": "FacebookAI/roberta-base"
+    },
+    {
+      "_group": "llm_ablation",
+      "name": "trans_bert",
+      "llm_name": "google-bert/bert-base-uncased"
+    }
+
+  ]
+}

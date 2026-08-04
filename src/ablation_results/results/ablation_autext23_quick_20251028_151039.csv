@@ -1,0 +1,7 @@
+experiment,gnn_type,description,test_accuracy,test_f1,best_accuracy,best_f1,status
+Q0_baseline,Vanilla-GTN-NoEdge,Baseline: Vanilla GTN no edges,0.0,0.0,0.0,0.0,FAILED: main() got an unexpected keyword argument 'description'
+Q1_vanilla_edge_concat,Vanilla-GTN-EdgeConcat,Vanilla GTN: Edge concatenation,0.0,0.0,0.0,0.0,FAILED: main() got an unexpected keyword argument 'description'
+Q2_isg_basic,ISG-VanillaGTN,ISG-GTN: Core ISG features,0.0,0.0,0.0,0.0,FAILED: main() got an unexpected keyword argument 'description'
+Q3_isg_full,ISG-VanillaGTN,ISG-GTN: Full configuration,0.0,0.0,0.0,0.0,FAILED: main() got an unexpected keyword argument 'description'
+Q4_hybrid_basic,Hybrid-ISG-GTN,Hybrid: Edge concat + ISG features,0.0,0.0,0.0,0.0,FAILED: main() got an unexpected keyword argument 'description'
+Q5_hybrid_full,Hybrid-ISG-GTN,Hybrid: Full configuration (BEST),0.0,0.0,0.0,0.0,FAILED: main() got an unexpected keyword argument 'description'

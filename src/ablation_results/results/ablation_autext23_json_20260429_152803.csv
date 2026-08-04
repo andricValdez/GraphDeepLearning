@@ -1,0 +1,2 @@
+experiment,gnn_type,description,test_accuracy,test_f1,best_accuracy,best_f1,val_accuracy,val_f1,status,mlflow_run_id
+hybrid_dr075,Hybrid-ISG-GTN,No description,0.7896665445218028,0.7840397829942045,0.7999267130817149,0.7991633237263314,0.0,0.7355612165340868,SUCCESS,f40dd63e09fc45acb6b0094d22e492e9
